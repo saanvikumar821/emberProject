@@ -153,6 +153,10 @@ public final class BusData {
         return out;
     }
 
+    public static List<Quote> getQuotes(Stop from, Stop to, LocalDate day) throws Exception {
+    return fetchQuotes(from, to, day);
+}
+
     /**
      * Offline stand-in: a real Dundee to Edinburgh weekday timetable captured from the API.
      * Returns an empty list for any other route.
