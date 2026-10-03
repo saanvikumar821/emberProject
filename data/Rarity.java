@@ -11,10 +11,10 @@ package data;
 public enum Rarity {
     //        label        bookings  reward icon  reward title
     COMMON   ("Common",     1,       "BUS",       "Passenger"),
-    UNCOMMON ("Uncommon",   3,       "TREE",      "Regular"),
-    RARE     ("Rare",       7,       "MOUNTAIN",  "Commuter"),
-    EPIC     ("Epic",       15,      "CASTLE",    "Road Warrior"),
-    LEGENDARY("Legendary",  30,      "STAR",      "Ember Legend");
+    UNCOMMON ("Uncommon",   5,       "TREE",      "Regular"),
+    RARE     ("Rare",       15,       "MOUNTAIN",  "Commuter"),
+    EPIC     ("Epic",       50,      "CASTLE",    "Road Warrior"),
+    LEGENDARY("Legendary",  100,      "STAR",      "Ember Legend");
 
     public final String label;
     public final int bookingsNeeded;
