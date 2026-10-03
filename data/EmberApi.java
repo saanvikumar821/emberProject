@@ -41,7 +41,15 @@ public final class EmberApi {
 
     public static final String BASE_URL = "https://api.ember.to";
     public static final ZoneId LONDON = ZoneId.of("Europe/London");
-    private static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
+    public static final DateTimeFormatter HM = DateTimeFormatter.ofPattern("HH:mm");
+
+    // ---- Reward rules ----
+    public static final int REWARD_AT = 5;       // streak needed for the discount
+    public static final int FREE_TRIP_AT = 10;   // streak needed for a free trip
+    public static final double DISCOUNT = 0.20;
+
+    static final int MATCH_MINUTES = 15;                 // departures this close count as the same bus
+    static final int SAMPLE_FROM = 13, SAMPLE_TO = 42;   // offline sample only covers Dundee -> Edinburgh
 
     private static final HttpClient CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(6)).build();
