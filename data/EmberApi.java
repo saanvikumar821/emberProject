@@ -88,11 +88,23 @@ public final class EmberApi {
     /** One journey = one bus: a route plus a usual departure time. Tracks its streak and its lifetime bookings. */
     public static class Streak {
         public final Stop from, to; public final LocalTime time;
+        public LocalDate lastBookedDate; 
         public int count;      // current streak (days in a row); drives the discount
         public int bookings;   // lifetime bookings of this journey; drives its rarity level
+
+        /** Seed for a brand-new journey discovered at booking time. */
+        public Streak(Stop from, Stop to, LocalTime time) {
+            this.from = from; this.to = to; this.time = time;
+        }
+
         public Streak(Stop from, Stop to, LocalTime time, int count, int bookings) {
             this.from = from; this.to = to; this.time = time; this.count = count; this.bookings = bookings;
         }
+
+        public Streak(Stop from, Stop to, LocalTime time, int count, int bookings, LocalDate lastBookedDate) {
+            this.from = from; this.to = to; this.time = time; this.count = count; this.bookings = bookings; this.lastBookedDate = lastBookedDate;
+        }
+
         public String label() {
             return from.shortName() + " \u2192 " + to.shortName() + " \u00B7 " + HM.format(time);
         }
@@ -236,23 +248,69 @@ public final class EmberApi {
         return best;
     }
 
-    /** Records a booking: adds one day and one booking to the matching journey, or starts a new one. Saves the account. */
-    public static Streak recordBooking(Stop from, Stop to, LocalTime dep) {
+    // /** Records a booking: adds one day and one booking to the matching journey, or starts a new one. Saves the account. */
+    // public static Streak recordBooking(Stop from, Stop to, LocalTime dep) {
+    //     Account acc = AccountStore.current();
+    //     Rarity before = acc.highestRarity();      // snapshot before the booking
+
+    //     Streak s = findStreak(from, to, dep);
+    //     if (s == null) {
+    //         s = new Streak(from, to, dep, 0, 0);
+    //         journeys().add(s);
+    //     }
+    //     Rarity journeyBefore = s.rarity();        // this journey's level before the booking
+    //     s.count++;
+    //     s.bookings++;
+
+    //     // A random avatar for every new level this journey just reached.
+    //     acc.syncRewards(journeyBefore, s.rarity(), before);
+    //     AccountStore.save();                       // saves the new icon/title too
+    //     return s;
+    // }
+
+    /**
+     * Records one booking of a journey. Streaks only grow when the SAME journey
+     * is booked on consecutive calendar days; a gap resets the streak to 1, and
+     * a second booking on the same day leaves the count unchanged.
+     *
+     * @return the Streak for this journey, with its count already updated.
+     */
+    public static Streak recordBooking(Stop from, Stop to, LocalTime time) {
         Account acc = AccountStore.current();
-        Rarity before = acc.highestRarity();      // snapshot before the booking
+        LocalDate today = ZonedDateTime.now(LONDON).toLocalDate();
 
-        Streak s = findStreak(from, to, dep);
-        if (s == null) {
-            s = new Streak(from, to, dep, 0, 0);
-            journeys().add(s);
+        // 1. Find the matching journey for this from/to/time.
+        Streak s = null;
+        for (Streak j : acc.journeys) {
+            if (j.from.equals(from) && j.to.equals(to) && j.time.equals(time)) {
+                s = j;
+                break;
+            }
         }
-        Rarity journeyBefore = s.rarity();        // this journey's level before the booking
-        s.count++;
-        s.bookings++;
 
-        // A random avatar for every new level this journey just reached.
-        acc.syncRewards(journeyBefore, s.rarity(), before);
-        AccountStore.save();                       // saves the new icon/title too
+        // 2. New journey → start at 1.
+        if (s == null) {
+            s = new Streak(from, to, time, 1, 1, today);
+            acc.journeys.add(s);                    // <-- was "streaks.add(s)"
+            AccountStore.save();
+            return s;
+        }
+
+        // 3. Same journey → apply the consecutive-day rule.
+        LocalDate last = s.lastBookedDate;
+        if (last == null) {
+            s.count = 1;
+        } else if (last.equals(today)) {
+            // Already booked today: no increment, no reset.
+        } else if (last.equals(today.minusDays(1))) {
+            s.count += 1;                           // consecutive day → increment
+        } else {
+            s.count = 1;                            // missed a day → reset
+        }
+
+        s.lastBookedDate = today;
+        s.bookings += 1;                            // total bookings (for rarity)
+        AccountStore.save();
         return s;
     }
 
