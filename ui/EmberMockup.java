@@ -4,6 +4,8 @@ import java.awt.*;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 
+import static ui.Constants.*;
+
 /**
  * Clickable mockup: bus booking with streak rewards.
  * Run with:  java EmberMockup.java   (Java 11 or newer)
@@ -12,9 +14,7 @@ import javax.swing.border.EmptyBorder;
 public class EmberMockup {
 
     // ---- Look and feel ----
-    static final Color BG = new Color(0x12, 0x1A, 0x1F);
     static final Color CARD = new Color(0x1E, 0x2A, 0x31);
-    static final Color ACCENT = new Color(0xFF, 0x7A, 0x2F);
     static final Color GOOD = new Color(0x4C, 0xD9, 0x8A);
     static final Color TEXT = new Color(0xF2, 0xF4, 0xF5);
     static final Color MUTED = new Color(0x9A, 0xA8, 0xB0);
