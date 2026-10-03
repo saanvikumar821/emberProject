@@ -542,8 +542,6 @@ public class EmberRewardApp {
         Col body = new Col(BG, null, 0, 16);
         body.add(journeyCard(q));
         body.add(gap(6));
-        body.add(label("Ticket " + lastBooking.tripId
-                + " \u00B7 paid " + money(lastBooking.pricePaidPence), 12, false, MUTED));
         body.add(gap(12));
 
         // Level panel: celebrates a level-up, otherwise shows progress to the next level.
