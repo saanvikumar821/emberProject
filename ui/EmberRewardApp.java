@@ -12,6 +12,12 @@ import data.Rarity;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.io.File;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -20,6 +26,7 @@ import java.util.List;
 import java.util.Locale;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import javax.swing.filechooser.FileNameExtensionFilter;
 import javax.swing.table.DefaultTableModel;
 import static ui.Constants.*;
 
@@ -444,13 +451,13 @@ public class EmberRewardApp {
         if (soldOut) pick.setText("Sold out");
         pick.addActionListener(e -> {
             selected = q;
-            show("checkout", checkoutScreen());
+            show("verification", verifyScreen());
         });
         c.add(fill(pick, 36));
         return c;
     }
 
-    JComponent checkoutScreen() {
+    JComponent verifyScreen() {
         Quote q = selected;
         Streak j = journeyOf(q);
         int s = j == null ? 0 : j.count;
@@ -458,18 +465,10 @@ public class EmberRewardApp {
         int off = discounted ? (int) Math.round(q.pence * EmberApi.DISCOUNT) : 0;
 
         Col p = new Col(BG, null, 0, 0);
-        p.add(header("Checkout", dayName()));
+        p.add(header("Verification", dayName()));
         Col body = new Col(BG, null, 0, 16);
 
         body.add(journeyCard(q));
-        body.add(gap(12));
-
-        Col fare = card(14);
-        fare.add(line("1 adult", money(q.pence), TEXT));
-        if (discounted) fare.add(line("Streak reward (20% off)", "-" + money(off), GOOD));
-        fare.add(gap(4));
-        fare.add(line("Total", money(q.pence - off), TEXT));
-        body.add(fare);
         body.add(gap(12));
 
         String note;
@@ -490,33 +489,10 @@ public class EmberRewardApp {
         body.add(banner);
         body.add(gap(16));
 
-        Btn pay = new Btn("Pay " + money(q.pence - off), 0);
-        pay.addActionListener(e -> {
-            if (q.seats <= 0) {
-                JOptionPane.showMessageDialog(frame,
-                        "Sorry, this bus just sold out. Please pick another departure.",
-                        "Sold out", JOptionPane.WARNING_MESSAGE);
-                show("search", searchScreen());
-                return;
-            }
-            lastBooking = BookingStore.record(from, to, q, q.pence - off);
-            q.seats--;
-
-            Streak prev = journeyOf(q);
-            tierBefore = prev == null ? null : prev.rarity();
-            Rarity accountBefore = AccountStore.current().highestRarity();
-            lastBooked = EmberApi.recordBooking(from, to, q.dep.toLocalTime());
-            Rarity now = lastBooked.rarity();
-            levelledUp = now != tierBefore;   // also true for a brand-new journey
-            rewardTier = levelledUp && (accountBefore == null || now.ordinal() > accountBefore.ordinal())
-                    ? now : null;
-            justUnlocked = (lastBooked.count == REWARD_AT || lastBooked.count == FREE_TRIP_AT);
-            show("confirm", confirmScreen());
-        });
-        body.add(fill(pay, 46));
-        body.add(gap(6));
-        body.add(label("Demo only: no payment is taken and no ticket is issued.", 11, false, MUTED));
-        body.add(gap(10));
+        Btn pay = new Btn("Verify by uploading your receipt", 0);
+        pay.addActionListener(e -> uploadPdf());
+        body.add(fill(pay, 40));
+        body.add(gap(16));
         Btn back = new Btn("Back to departures", 2);
         back.addActionListener(e -> show("search", searchScreen()));
         body.add(fill(back, 36));
@@ -916,6 +892,34 @@ public class EmberRewardApp {
     }
 
     // ---- UI helpers ----
+
+    void uploadPdf() {
+        JFileChooser chooser = new JFileChooser();
+        chooser.setDialogTitle("Choose a PDF to upload");
+        chooser.setAcceptAllFileFilterUsed(false);
+        chooser.setFileFilter(new FileNameExtensionFilter("PDF documents (*.pdf)", "pdf"));
+        if (chooser.showOpenDialog(frame) != JFileChooser.APPROVE_OPTION) return;   // cancelled: stay put
+
+        File pdf = chooser.getSelectedFile();
+        if (!pdf.isFile() || !pdf.getName().toLowerCase(Locale.ROOT).endsWith(".pdf")) {
+            JOptionPane.showMessageDialog(frame, "Please choose a PDF file.",
+                    "Not a PDF", JOptionPane.WARNING_MESSAGE);
+            return;
+        }
+        try {
+            Path dir = Paths.get(System.getProperty("user.home"), ".ember_rewards", "uploads",
+                    AccountStore.current().username);
+            Files.createDirectories(dir);
+            Files.copy(pdf.toPath(), dir.resolve(pdf.getName()), StandardCopyOption.REPLACE_EXISTING);
+        } catch (IOException ex) {
+            JOptionPane.showMessageDialog(frame, "Couldn't upload that file: " + ex.getMessage(),
+                    "Upload failed", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+        JOptionPane.showMessageDialog(frame, "\u201C" + pdf.getName() + "\u201D was uploaded successfully.",
+                "Upload complete", JOptionPane.INFORMATION_MESSAGE);
+        show("journeys", journeysScreen());
+    }
 
     String dayName() {
         LocalDate today = LocalDate.now(EmberApi.LONDON);
