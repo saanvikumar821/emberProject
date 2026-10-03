@@ -5,6 +5,8 @@ import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 
 import static ui.Constants.*;
+import data.BusData;
+import data.BusData.trip;
 
 /**
  * Clickable mockup: bus booking with streak rewards.
