@@ -4,8 +4,8 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 
-import data.BusData.Quote;
-import data.BusData.Stop;
+import data.EmberApi.Quote;
+import data.EmberApi.Stop;
 
 /**
  * In-memory store for completed bookings.

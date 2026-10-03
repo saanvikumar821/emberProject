@@ -31,7 +31,7 @@ public class Booking implements Serializable {
         this.departure = departure;
         this.pricePaidPence = pricePaidPence;
         this.listPricePence = listPricePence;
-        this.bookedAt = LocalDateTime.now(BusData.LONDON);
+        this.bookedAt = LocalDateTime.now(EmberApi.LONDON);
     }
 
     /** How much the streak reward knocked off (0 if none). */

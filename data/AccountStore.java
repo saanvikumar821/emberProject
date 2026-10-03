@@ -1,7 +1,7 @@
 package data;
 
-import data.BusData.Stop;
-import data.BusData.Streak;
+import data.EmberApi.Stop;
+import data.EmberApi.Streak;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.Writer;
@@ -138,7 +138,7 @@ public final class AccountStore {
 
     /** First-run demo account with one journey at every rarity, so every colour is visible. */
     private static void seedDemo() {
-        List<Stop> st = BusData.fallbackStops();   // 0 Dundee, 1 Edinburgh, 2 Glasgow, 3 Perth, 4 Aberdeen
+        List<Stop> st = EmberApi.fallbackStops();   // 0 Dundee, 1 Edinburgh, 2 Glasgow, 3 Perth, 4 Aberdeen
         Account a = new Account("demo", "Demo Rider");
         a.journeys.add(new Streak(st.get(0), st.get(1), LocalTime.of(7, 17), 4, 12));    // Rare
         a.journeys.add(new Streak(st.get(0), st.get(1), LocalTime.of(8, 16), 2, 3));     // Uncommon

@@ -1,6 +1,6 @@
 package data;
 
-import data.BusData.Streak;
+import data.EmberApi.Streak;
 import java.util.ArrayList;
 import java.util.List;
 
