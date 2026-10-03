@@ -1,1 +1,13 @@
 API stuff: https://wics-hackathon-docs-28b89c.gitlab.io/
+
+
+What counts as the same bus?
+
+What breaks a streak?
+
+Is there a streak freeze?
+
+What are the rewards?
+
+Why would ember want this?
+
