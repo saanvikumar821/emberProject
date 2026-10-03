@@ -462,7 +462,6 @@ public class EmberRewardApp {
         Streak j = journeyOf(q);
         int s = j == null ? 0 : j.count;
         boolean discounted = s >= REWARD_AT;
-        int off = discounted ? (int) Math.round(q.pence * EmberApi.DISCOUNT) : 0;
 
         Col p = new Col(BG, null, 0, 0);
         p.add(header("Verification", dayName()));
@@ -490,7 +489,19 @@ public class EmberRewardApp {
         body.add(gap(16));
 
         Btn pay = new Btn("Verify by uploading your receipt", 0);
-        pay.addActionListener(e -> uploadPdf());
+        pay.addActionListener(e -> {
+            uploadPdf();
+            Streak prev = journeyOf(q);
+            tierBefore = prev == null ? null : prev.rarity();
+            Rarity accountBefore = AccountStore.current().highestRarity();
+            lastBooked = EmberApi.recordBooking(from, to, q.dep.toLocalTime());
+            Rarity now = lastBooked.rarity();
+            levelledUp = now != tierBefore;   // also true for a brand-new journey
+            rewardTier = levelledUp && (accountBefore == null || now.ordinal() > accountBefore.ordinal())
+                    ? now : null;
+            justUnlocked = (lastBooked.count == REWARD_AT || lastBooked.count == FREE_TRIP_AT);
+            show("confirm", confirmScreen());
+        });
         body.add(fill(pay, 40));
         body.add(gap(16));
         Btn back = new Btn("Back to departures", 2);
@@ -918,7 +929,6 @@ public class EmberRewardApp {
         }
         JOptionPane.showMessageDialog(frame, "\u201C" + pdf.getName() + "\u201D was uploaded successfully.",
                 "Upload complete", JOptionPane.INFORMATION_MESSAGE);
-        show("journeys", journeysScreen());
     }
 
     String dayName() {
