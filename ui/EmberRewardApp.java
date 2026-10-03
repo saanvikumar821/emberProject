@@ -3,10 +3,13 @@ package ui;
 import java.awt.*;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import javax.swing.table.DefaultTableModel;
 
 import static ui.Constants.*;
 import data.BusData;
-import data.BusData.trip;
+import data.BusData.Trip;
 
 /**
  * Clickable mockup: bus booking with streak rewards.
@@ -14,19 +17,18 @@ import data.BusData.trip;
  * All data is fake and held in memory; payment is mocked.
  */
 public class EmberRewardApp {
+    // ---- App state ----
+    final Map<String, Integer> streaks = new LinkedHashMap<>();
+    {   // fake starting data
+        streaks.put("Dundee \u2192 Edinburgh \u00B7 07:15", 4);
+        streaks.put("Dundee \u2192 Edinburgh \u00B7 08:15", 2);
+        streaks.put("Perth \u2192 Glasgow \u00B7 09:15", 7);
+    }
+    String from = "Dundee", to = "Edinburgh";
+    Trip selected;
+    boolean justUnlocked;
     
     // ---- Fake data ----
-    static class Trip {
-        final String dep, arr; final double price;
-        Trip(String dep, String arr, double price) { this.dep = dep; this.arr = arr; this.price = price; }
-    }
-    static final String[] STOPS = {"Dundee", "Edinburgh", "Glasgow", "Perth"};
-    static final Trip[] TRIPS = {
-        new Trip("06:15", "07:50", 8.40),
-        new Trip("07:15", "08:50", 9.80),
-        new Trip("08:15", "09:50", 9.80),
-        new Trip("09:15", "10:50", 7.60),
-    };
     static final String USUAL_DEP = "07:15";   // the user's "usual bus"
     static final int REWARD_AT = 5;            // streak needed for the discount
     static final int FREE_TRIP_AT = 10;        // streak needed for a free trip
@@ -71,8 +73,8 @@ public class EmberRewardApp {
         p.add(label("Where to?", 26, true, TEXT));
         p.add(gap(12));
 
-        JComboBox<String> fromBox = new JComboBox<>(STOPS);
-        JComboBox<String> toBox = new JComboBox<>(STOPS);
+        JComboBox<String> fromBox = new JComboBox<>(BusData.STOPS);
+        JComboBox<String> toBox = new JComboBox<>(BusData.STOPS);
         fromBox.setSelectedItem(from);
         toBox.setSelectedItem(to);
         fromBox.addActionListener(e -> { from = (String) fromBox.getSelectedItem(); show(searchScreen()); });
@@ -86,7 +88,7 @@ public class EmberRewardApp {
         p.add(label("Tomorrow \u00B7 " + from + " \u2192 " + to, 14, true, TEXT));
         p.add(gap(8));
 
-        for (Trip t : TRIPS) {
+        for (Trip t : BusData.TRIPS) {
             boolean usual = isUsual(t);
             JPanel card = column(CARD, 12);
             JPanel row = new JPanel(new BorderLayout());
@@ -255,8 +257,14 @@ public class EmberRewardApp {
 
     // ---- Helpers ----
 
-    boolean isUsual(Trip t) {
-        return t.dep.equals(USUAL_DEP) && from.equals("Dundee") && to.equals("Edinburgh");
+    String key(Trip t) { return from + " \u2192 " + to + " \u00B7 " + t.dep; }
+
+    int streakOf(Trip t) { return streaks.getOrDefault(key(t), 0); }
+
+    static String nextReward(int s) {
+        if (s >= FREE_TRIP_AT) return "All unlocked";
+        int next = s < REWARD_AT ? REWARD_AT : FREE_TRIP_AT;
+        return (next - s) + " to " + (next == REWARD_AT ? "20% off" : "free trip");
     }
 
     static String money(double v) { return String.format("\u00A3%.2f", v); }
