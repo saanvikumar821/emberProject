@@ -1,5 +1,14 @@
 package ui;
 
+import data.Account;
+import data.AccountStore;
+import data.Booking;
+import data.BookingStore;
+import data.EmberApi;
+import data.EmberApi.Quote;
+import data.EmberApi.Stop;
+import data.EmberApi.Streak;
+import data.Rarity;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
@@ -12,17 +21,7 @@ import java.util.Locale;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
-
 import static ui.Constants.*;
-import data.Account;
-import data.AccountStore;
-import data.Booking;
-import data.BookingStore;
-import data.EmberApi;
-import data.EmberApi.Quote;
-import data.EmberApi.Stop;
-import data.EmberApi.Streak;
-import data.Rarity;
 
 /**
  * Ember bus booking where every journey you book levels up.
