@@ -23,3 +23,14 @@ What are the rewards?
 
 Why would ember want this?
 
+
+
+Classes for data
+- EmberApi
+    - Stops and departures from EmberApi
+- Booking
+    - One booked trip: trip id, origin and destination ids, route number, departure time, price paid
+- BookingStore
+    - save(booking) and loadAll()
+- StreakCalculator
+    - Takes the bookings and returns the weekly streak, daily super streak and unlocked rewards
