@@ -16,30 +16,22 @@ import javax.swing.table.DefaultTableModel;
 import static ui.Constants.*;
 import data.Account;
 import data.AccountStore;
+import data.Booking;
+import data.BookingStore;
 import data.BusData;
 import data.BusData.Quote;
 import data.BusData.Stop;
 import data.BusData.Streak;
 import data.Rarity;
 
-/**
- * Ember bus booking where every journey you book levels up.
- * Compile from the project root:  javac data/*.java ui/*.java
- * Run with:                       java ui.EmberRewardApp
- *
- * Tabs: Journeys (the level-up collection), Book, Streaks, Account.
- * Colours come from ui.Constants; data and accounts come from the data package.
- * Payment is simulated: nothing is ever sent to the API.
- */
 public class EmberRewardApp {
 
     static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("EEE d MMM", Locale.UK);
     static final int REWARD_AT = BusData.REWARD_AT;
     static final int FREE_TRIP_AT = BusData.FREE_TRIP_AT;
 
-    // The one colour the palette has no equivalent for: "only N seats left" warnings.
     static final Color WARN = new Color(0xE0A030);
-    static final Color SHADE = new Color(0, 0, 0, 60);   // dark overlay on rarity-coloured cards
+    static final Color SHADE = new Color(0, 0, 0, 60);
 
     // ---- App state ----
     List<Stop> stops = BusData.fallbackStops();
@@ -52,7 +44,8 @@ public class EmberRewardApp {
     Quote selected;
     Streak selectedJourney;
     Streak lastBooked;
-    Rarity tierBefore, rewardTier;     // for the "levelled up" panel after paying
+    Booking lastBooking;                // <-- new
+    Rarity tierBefore, rewardTier;
     boolean levelledUp, justUnlocked;
     String accountMsg;
     String screen = "journeys";
@@ -83,7 +76,7 @@ public class EmberRewardApp {
         show("journeys", journeysScreen());
         frame.setVisible(true);
         loadStops();
-        loadQuotes();   // loads in the background; the Book tab shows it when opened
+        loadQuotes();
     }
 
     void show(String name, JComponent content) {
@@ -95,18 +88,16 @@ public class EmberRewardApp {
         page.scrollRectToVisible(new Rectangle(0, 0, 1, 1));
     }
 
-    /** Redraws the Book tab, but only if the user is looking at it. */
     void refreshSearch() {
         if (screen.equals("search")) show("search", searchScreen());
     }
 
-    /** Opens the Book tab and (re)loads departures for the current from/to/date. */
     void openSearch() {
         screen = "search";
         loadQuotes();
     }
 
-    // ---- Loading data (network calls run off the UI thread) ----
+    // ---- Loading data ----
 
     void loadStops() {
         new SwingWorker<List<Stop>, Void>() {
@@ -121,7 +112,7 @@ public class EmberRewardApp {
                     if (!loaded.contains(to)) loaded.add(to);
                     stops = loaded;
                     refreshSearch();
-                } catch (Exception ignored) { /* keep the fallback list */ }
+                } catch (Exception ignored) { }
             }
         }.execute();
     }
@@ -155,11 +146,12 @@ public class EmberRewardApp {
                 }
             }
             @Override protected void done() {
-                if (req != requestNo) return;   // a newer search replaced this one
+                if (req != requestNo) return;
                 List<Quote> result;
                 try { result = get(); } catch (Exception e) { result = new ArrayList<>(); }
                 ZonedDateTime now = ZonedDateTime.now(BusData.LONDON);
                 result.removeIf(q -> q.dep.isBefore(now));
+                result.removeIf(q -> q.seats <= 0);   // NEW: hide sold-out
                 quotes = result;
                 live = gotLive;
                 error = problem;
@@ -192,7 +184,7 @@ public class EmberRewardApp {
         return null;
     }
 
-    // ---- Journeys tab (the main feature) ----
+    // ---- Journeys tab ----
 
     JComponent journeysScreen() {
         Account acc = AccountStore.current();
@@ -386,7 +378,6 @@ public class EmberRewardApp {
         } else if (quotes.isEmpty()) {
             body.add(wrapped("No buses left on this day for this route. Try another date.", 14, MUTED));
         } else {
-            // Buses you've booked before go in their own section, most-levelled first.
             List<Quote> mine = new ArrayList<>();
             for (Quote q : quotes) if (journeyOf(q) != null) mine.add(q);
             mine.sort((a, b) -> journeyOf(b).bookings - journeyOf(a).bookings);
@@ -436,6 +427,9 @@ public class EmberRewardApp {
         }
         c.add(gap(8));
         Btn pick = new Btn("Select", booked ? 0 : 1);
+        boolean soldOut = q.seats <= 0;
+        pick.setEnabled(!soldOut);
+        if (soldOut) pick.setText("Sold out");
         pick.addActionListener(e -> {
             selected = q;
             show("checkout", checkoutScreen());
@@ -486,12 +480,22 @@ public class EmberRewardApp {
 
         Btn pay = new Btn("Pay " + money(q.pence - off), 0);
         pay.addActionListener(e -> {
+            if (q.seats <= 0) {
+                JOptionPane.showMessageDialog(frame,
+                        "Sorry, this bus just sold out. Please pick another departure.",
+                        "Sold out", JOptionPane.WARNING_MESSAGE);
+                show("search", searchScreen());
+                return;
+            }
+            lastBooking = BookingStore.record(from, to, q, q.pence - off);
+            q.seats--;
+
             Streak prev = journeyOf(q);
             tierBefore = prev == null ? null : prev.rarity();
             Rarity accountBefore = AccountStore.current().highestRarity();
             lastBooked = BusData.recordBooking(from, to, q.dep.toLocalTime());
             Rarity now = lastBooked.rarity();
-            levelledUp = now != tierBefore;   // also true for a brand-new journey
+            levelledUp = now != tierBefore;
             rewardTier = levelledUp && (accountBefore == null || now.ordinal() > accountBefore.ordinal())
                     ? now : null;
             justUnlocked = (lastBooked.count == REWARD_AT || lastBooked.count == FREE_TRIP_AT);
@@ -508,7 +512,6 @@ public class EmberRewardApp {
         return p;
     }
 
-    /** The bus details card used on the checkout and confirm screens. */
     JComponent journeyCard(Quote q) {
         Col c = card(14);
         if (!q.route.isEmpty()) {
@@ -539,10 +542,10 @@ public class EmberRewardApp {
         Col body = new Col(BG, null, 0, 16);
         body.add(journeyCard(q));
         body.add(gap(6));
-        body.add(label("Demo ticket ref: DEMO-" + (1000 + st.bookings * 37), 12, false, MUTED));
+        body.add(label("Ticket " + lastBooking.tripId
+                + " \u00B7 paid " + money(lastBooking.pricePaidPence), 12, false, MUTED));
         body.add(gap(12));
 
-        // Level panel: celebrates a level-up, otherwise shows progress to the next level.
         Col lv = new Col(rc, rc.brighter(), 16, 14);
         JPanel row = new JPanel(new BorderLayout(12, 0));
         row.setOpaque(false);
@@ -580,15 +583,91 @@ public class EmberRewardApp {
         body.add(result);
         body.add(gap(16));
 
-        Btn view = new Btn("View my journeys", 0);
-        view.addActionListener(e -> show("journeys", journeysScreen()));
-        body.add(fill(view, 46));
+        Btn viewB = new Btn("View my bookings", 0);
+        viewB.addActionListener(e -> show("bookings", bookingsScreen()));
+        body.add(fill(viewB, 46));
         body.add(gap(8));
-        Btn again = new Btn("Book another trip", 1);
+        Btn view = new Btn("View my journeys", 1);
+        view.addActionListener(e -> show("journeys", journeysScreen()));
+        body.add(fill(view, 40));
+        body.add(gap(8));
+        Btn again = new Btn("Book another trip", 2);
         again.addActionListener(e -> { date = date.plusDays(1); openSearch(); });
         body.add(fill(again, 40));
         p.add(body);
         return p;
+    }
+
+    // ---- My bookings ----
+
+    JComponent bookingsScreen() {
+        Col p = new Col(BG, null, 0, 0);
+        p.add(header("My bookings", "Every trip you've booked"));
+        Col body = new Col(BG, null, 0, 16);
+
+        List<Booking> all = BookingStore.all();
+        if (all.isEmpty()) {
+            Col empty = card(14);
+            empty.add(label("No bookings yet", 16, true, TEXT));
+            empty.add(gap(4));
+            empty.add(wrapped("Your tickets will show up here once you've booked a trip.", 13, MUTED));
+            empty.add(gap(12));
+            Btn go = new Btn("Book a trip", 0);
+            go.addActionListener(e -> openSearch());
+            empty.add(fill(go, 40));
+            body.add(empty);
+            p.add(body);
+            return p;
+        }
+
+        int spent = 0, saved = 0;
+        for (Booking b : all) { spent += b.pricePaidPence; saved += b.discountPence(); }
+        Col sum = new Col(OVERVIEW, ACCENT, 16, 14);
+        sum.add(label(all.size() + (all.size() == 1 ? " booking" : " bookings"), 18, true, TEXT));
+        sum.add(gap(4));
+        sum.add(label("Total paid: " + money(spent), 13, false, TEXT));
+        if (saved > 0) sum.add(label("Saved with rewards: " + money(saved), 13, true, GOOD));
+        body.add(sum);
+        body.add(gap(14));
+
+        body.add(label("Recent", 15, true, TEXT));
+        body.add(gap(6));
+        for (Booking b : all) {
+            body.add(bookingCard(b));
+            body.add(gap(8));
+        }
+        p.add(body);
+        return p;
+    }
+
+    JComponent bookingCard(Booking b) {
+        Col c = card(12);
+        String fromName = stopName(b.originId);
+        String toName = stopName(b.destinationId);
+
+        JPanel row = new JPanel(new BorderLayout());
+        row.setOpaque(false);
+        row.add(label(fromName + " \u2192 " + toName, 14, true, TEXT), BorderLayout.WEST);
+        row.add(label(money(b.pricePaidPence), 15, true, TEXT), BorderLayout.EAST);
+        c.add(fill(row, 22));
+
+        String day = DAY.format(b.departure);
+        String time = BusData.HM.format(b.departure);
+        c.add(label(day + " \u00B7 " + time
+                + (b.route.isEmpty() ? "" : " \u00B7 Route " + b.route), 12, false, MUTED));
+        c.add(gap(4));
+        if (b.discountPence() > 0) {
+            c.add(label("Saved " + money(b.discountPence()) + " with a streak reward", 12, true, GOOD));
+            c.add(gap(4));
+        }
+        c.add(label("Ticket " + b.tripId, 11, false, MUTED));
+        return c;
+    }
+
+    String stopName(int id) {
+        for (Stop s : stops) if (s.id == id) return s.name;
+        for (Stop s : BusData.fallbackStops()) if (s.id == id) return s.name;
+        return "Stop " + id;
     }
 
     // ---- Streaks tab ----
@@ -690,7 +769,6 @@ public class EmberRewardApp {
         p.add(header("Account", "Your profile and rewards"));
         Col body = new Col(BG, null, 0, 16);
 
-        // Profile card
         Color pc = rarityColor(top);
         Col profile = top == null ? card(14) : new Col(pc, pc.brighter(), 16, 14);
         JPanel row = new JPanel(new BorderLayout(12, 0));
@@ -706,7 +784,12 @@ public class EmberRewardApp {
         body.add(profile);
         body.add(gap(16));
 
-        // Icon chooser
+        // NEW: My bookings button
+        Btn myBookings = new Btn("My bookings (" + BookingStore.all().size() + ")", 1);
+        myBookings.addActionListener(e -> show("bookings", bookingsScreen()));
+        body.add(fill(myBookings, 40));
+        body.add(gap(16));
+
         body.add(label("Profile icon", 15, true, TEXT));
         body.add(label("Unlock new icons by levelling up journeys.", 12, false, MUTED));
         body.add(gap(6));
@@ -733,7 +816,6 @@ public class EmberRewardApp {
         body.add(icons);
         body.add(gap(16));
 
-        // Title chooser
         body.add(label("Profile title", 15, true, TEXT));
         body.add(gap(6));
         JComboBox<String> titles = new JComboBox<>(acc.unlockedTitles().toArray(new String[0]));
@@ -750,7 +832,6 @@ public class EmberRewardApp {
         body.add(fill(titles, 34));
         body.add(gap(16));
 
-        // Switch account
         body.add(label("Accounts on this computer", 15, true, TEXT));
         body.add(gap(6));
         for (Account other : AccountStore.all()) {
@@ -766,7 +847,6 @@ public class EmberRewardApp {
         }
         body.add(gap(10));
 
-        // Create account
         body.add(label("Create a new account", 15, true, TEXT));
         body.add(gap(6));
         JTextField name = new JTextField();
@@ -887,7 +967,6 @@ public class EmberRewardApp {
 
     static Component gap(int h) { return Box.createVerticalStrut(h); }
 
-    /** Vertical stack with an optional rounded background and outline. */
     static class Col extends JPanel {
         final Color fillColor, lineColor; final int radius;
         Col(Color fillColor, Color lineColor, int radius, int pad) {
@@ -913,7 +992,6 @@ public class EmberRewardApp {
         }
     }
 
-    /** A grid with a fixed number of columns that keeps its natural height. */
     static class Grid extends JPanel {
         Grid(int cols) {
             super(new GridLayout(0, cols, cols > 2 ? 8 : 10, cols > 2 ? 8 : 10));
@@ -925,7 +1003,6 @@ public class EmberRewardApp {
         }
     }
 
-    /** A rounded square (or circle) badge with a vector icon inside. */
     static class IconView extends JComponent {
         final String id; final Color bg, fg; final boolean circle;
         boolean selected;
@@ -958,7 +1035,6 @@ public class EmberRewardApp {
         }
     }
 
-    /** Rounded button. kind: 0 = filled accent, 1 = outlined, 2 = text only. */
     static class Btn extends JButton {
         final int kind;
         Btn(String text, int kind) {
@@ -996,7 +1072,6 @@ public class EmberRewardApp {
         }
     }
 
-    /** Thin rounded progress bar with a track colour and a fill colour. */
     static class Bar extends JComponent {
         final int value, max; final Color track, fillColor;
         Bar(int value, int max, Color track, Color fillColor) {
@@ -1014,7 +1089,6 @@ public class EmberRewardApp {
         }
     }
 
-    /** Scrollable page that always matches the window width. */
     static class Page extends JPanel implements Scrollable {
         Page() { super(new BorderLayout()); setBackground(BG); }
         public Dimension getPreferredScrollableViewportSize() { return getPreferredSize(); }
