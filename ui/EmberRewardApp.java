@@ -315,7 +315,7 @@ public class EmberRewardApp {
         body.add(gap(14));
 
         body.add(label("Levels and rewards", 15, true, TEXT));
-        body.add(label("Reaching a level on any journey unlocks its reward for your account.", 12, false, MUTED));
+        body.add(label("Every new level on a journey unlocks a random avatar for your account.", 12, false, MUTED));
         body.add(gap(8));
         for (Rarity t : Rarity.values()) {
             boolean reached = s.bookings >= t.bookingsNeeded;
@@ -331,7 +331,7 @@ public class EmberRewardApp {
                     reached ? TEXT : MUTED));
             txt.add(label(t == Rarity.COMMON
                     ? "\u201C" + t.title + "\u201D title"
-                    : "Random new icon + \u201C" + t.title + "\u201D title", 12, false,
+                    : "Random new avatar + \u201C" + t.title + "\u201D title", 12, false,
                     reached ? TEXT : MUTED));
             line.add(txt, BorderLayout.CENTER);
             line.add(label(reached ? "\u2713" : "", 18, true, TEXT), BorderLayout.EAST);
@@ -566,10 +566,15 @@ public class EmberRewardApp {
         lv.add(fill(row, 52));
         lv.add(gap(10));
         lv.add(fill(new Bar((int) Math.round(st.progress() * 100), 100, new Color(0, 0, 0, 70), TEXT), 8));
-        if (rewardTier != null) {
+        if (rewardTier != null || !gainedIcons.isEmpty()) {
+            String msg;
+            if (gainedIcons.isEmpty()) msg = "New reward: the \u201C" + rewardTier.title + "\u201D title.";
+            else if (rewardTier != null) msg = "New reward: the \u201C" + rewardTier.title
+                    + "\u201D title and a new avatar, now equipped!";
+            else msg = "New avatar unlocked: " + Icons.name(gainedIcons.get(gainedIcons.size() - 1))
+                    + ", now equipped!";
             lv.add(gap(10));
-            lv.add(wrapped("New reward: the \u201C" + rewardTier.title + "\u201D title"
-                    + (gainedIcons.isEmpty() ? "." : " and a new profile icon, now equipped!"), 13, TEXT));
+            lv.add(wrapped(msg, 13, TEXT));
             if (!gainedIcons.isEmpty()) {
                 lv.add(gap(8));
                 JPanel newIcons = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
@@ -577,6 +582,9 @@ public class EmberRewardApp {
                 for (String id : gainedIcons) newIcons.add(new IconView(id, 48, SHADE, TEXT, true));
                 lv.add(fill(newIcons, 50));
             }
+        } else if (levelledUp && tierBefore != null) {
+            lv.add(gap(10));
+            lv.add(wrapped("You've already collected every avatar!", 13, TEXT));
         }
         body.add(lv);
         body.add(gap(10));
@@ -802,7 +810,7 @@ public class EmberRewardApp {
 
         // Icon chooser
         body.add(label("Profile icon", 15, true, TEXT));
-        body.add(label("Unlock new icons by levelling up journeys.", 12, false, MUTED));
+        body.add(label("Each time a journey reaches a new level, you unlock a random avatar.", 12, false, MUTED));
         body.add(gap(6));
         Grid icons = new Grid(6);
         for (String id : Icons.ACCOUNT_ICONS) {
@@ -810,7 +818,7 @@ public class EmberRewardApp {
             IconView v = new IconView(ok ? id : "LOCK", 52, ok ? SHADE : CARD,
                     ok ? TEXT : MUTED, false);
             v.selected = id.equals(acc.iconId);
-            v.setToolTipText(ok ? Icons.name(id) : "Reach a new level on any journey to unlock a random icon");
+            v.setToolTipText(ok ? Icons.name(id) : "Level up any journey to unlock a random avatar");
             if (ok) {
                 v.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
                 v.addMouseListener(new MouseAdapter() {

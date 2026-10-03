@@ -246,10 +246,12 @@ public final class EmberApi {
             s = new Streak(from, to, dep, 0, 0);
             journeys().add(s);
         }
+        Rarity journeyBefore = s.rarity();        // this journey's level before the booking
         s.count++;
         s.bookings++;
 
-        acc.syncRewards(before);                   // equips the new tier's icon if it went up
+        // A random avatar for every new level this journey just reached.
+        acc.syncRewards(journeyBefore, s.rarity(), before);
         AccountStore.save();                       // saves the new icon/title too
         return s;
     }

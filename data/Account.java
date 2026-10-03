@@ -52,6 +52,7 @@ public class Account {
         return out;
     }
 
+    /** Unlocks one random avatar the account doesn't own yet. Returns its id, or null if every avatar is owned. */
     private String grantRandomIcon() {
         List<String> pool = new ArrayList<>(IconCatalog.all());
         pool.removeAll(unlockedIcons);
@@ -61,19 +62,30 @@ public class Account {
         return pick;
     }
 
-    // Account.java
-    public void syncRewards(Rarity before) {
-        Rarity now = highestRarity();
-        if (now == null || now == before) return;
-        int from = before == null ? -1 : before.ordinal();
-        String last = null;
+    /**
+     * Call after a journey's booking count changes. For every level that journey
+     * just reached (above Common), unlocks one random avatar and equips the newest.
+     * Also equips the new title if the account's best level went up.
+     *
+     * @param journeyBefore the journey's level before the booking (null if it was new)
+     * @param journeyNow    the journey's level after the booking
+     * @param accountBefore the account's best level before the booking
+     * @return the avatars unlocked by this booking (empty if none)
+     */
+    public List<String> syncRewards(Rarity journeyBefore, Rarity journeyNow, Rarity accountBefore) {
+        List<String> gained = new ArrayList<>();
+        if (journeyNow == null) return gained;
+        int from = journeyBefore == null ? -1 : journeyBefore.ordinal();
         for (Rarity r : Rarity.values()) {
-            if (r.ordinal() > from && r.ordinal() <= now.ordinal() && r != Rarity.COMMON) {
+            if (r.ordinal() > from && r.ordinal() <= journeyNow.ordinal() && r != Rarity.COMMON) {
                 String icon = grantRandomIcon();
-                if (icon != null) last = icon;
+                if (icon != null) gained.add(icon);
             }
         }
-        if (last != null) iconId = last;
-        title = now.title;
+        if (!gained.isEmpty()) iconId = gained.get(gained.size() - 1);
+
+        Rarity top = highestRarity();
+        if (top != null && (accountBefore == null || top.ordinal() > accountBefore.ordinal())) title = top.title;
+        return gained;
     }
 }
