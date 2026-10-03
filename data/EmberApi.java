@@ -14,6 +14,7 @@ import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -29,11 +30,8 @@ import java.util.Map;
  * They throw IOException if the API can't be reached; catch it and either show a
  * message or fall back to sampleQuotes().
  *
- * Read-only: this class never books or pays for anything.
- *
- * Quick check from the project folder:
- *   javac data/EmberApi.java
- *   java data.EmberApi
+ * Also holds the journey/streak rules for the signed-in account (see AccountStore).
+ * Read-only towards Ember: this class never books or pays for anything.
  */
 public final class EmberApi {
 
@@ -67,39 +65,78 @@ public final class EmberApi {
             this.name = name;
             this.region = region;
         }
+        public Stop(int id, String name) { this(id, name, ""); }
+        public String shortName() { return name.replaceAll("\\s*\\(.*\\)", ""); }
         @Override public String toString() { return name; }
         @Override public boolean equals(Object o) { return o instanceof Stop && ((Stop) o).id == id; }
         @Override public int hashCode() { return id; }
     }
 
     /** One bookable departure between two stops, with its price and free seats. */
-    public static final class Quote {
-        /** Ember's ID for this exact bus on this exact day. Save it with a booking. */
-        public String tripUid = "";
-        /** The stop IDs that were searched for (the same ones passed to getQuotes). */
-        public int originId, destinationId;
-        /** The exact boarding and arrival points, e.g. "Dundee Slessor Gardens". */
-        public String originStop = "", destinationStop = "";
-        /** Scheduled times, already in UK time. */
-        public ZonedDateTime departure, arrival;
-        /** Route number ("E1"), and the destination board ("Edinburgh", "via Edinburgh Airport"). */
-        public String route = "", boardText = "", boardVia = "";
-        /** Prices in pence: 975 means £9.75. */
-        public int adultPence, childPence;
-        public int seatsLeft;
-        public boolean electric, wifi, toilet;
-        public String numberPlate = "";
-
-        public String departureTime() { return HM.format(departure); }
-        public String arrivalTime() { return HM.format(arrival); }
-        public long minutes() { return Duration.between(departure, arrival).toMinutes(); }
-        public String price() { return String.format("£%.2f", adultPence / 100.0); }
-
-        @Override public String toString() {
-            return departureTime() + " -> " + arrivalTime() + "  " + route + "  " + price()
-                    + "  " + seatsLeft + " seats  (" + originStop + " to " + destinationStop + ")";
+    public static class Quote {
+        public ZonedDateTime dep, arr;
+        public String originStop = "", destStop = "", route = "", board = "", via = "", plate = "";
+        public int pence, seats;
+        public boolean wifi, toilet, electric;
+        public String times() { return HM.format(dep) + " \u2192 " + HM.format(arr); }
+        public String duration() {
+            long m = Duration.between(dep, arr).toMinutes();
+            return (m / 60) + "h " + (m % 60) + "m";
         }
     }
+
+    /** One journey = one bus: a route plus a usual departure time. Tracks its streak and its lifetime bookings. */
+    public static class Streak {
+        public final Stop from, to; public final LocalTime time;
+        public int count;      // current streak (days in a row); drives the discount
+        public int bookings;   // lifetime bookings of this journey; drives its rarity level
+        public Streak(Stop from, Stop to, LocalTime time, int count, int bookings) {
+            this.from = from; this.to = to; this.time = time; this.count = count; this.bookings = bookings;
+        }
+        public String label() {
+            return from.shortName() + " \u2192 " + to.shortName() + " \u00B7 " + HM.format(time);
+        }
+        /** Current rarity tier, or null if never booked. */
+        public Rarity rarity() { return Rarity.forBookings(bookings); }
+        /** The tier this journey is working towards, or null at max level. */
+        public Rarity nextRarity() { Rarity r = rarity(); return r == null ? Rarity.COMMON : r.next(); }
+        /** Progress (0..1) from the current tier to the next one; 1.0 at max level. */
+        public double progress() {
+            Rarity cur = rarity(), nxt = nextRarity();
+            if (nxt == null) return 1.0;
+            int base = cur == null ? 0 : cur.bookingsNeeded;
+            return Math.min(1.0, (double) (bookings - base) / (nxt.bookingsNeeded - base));
+        }
+        public int bookingsToNext() {
+            Rarity nxt = nextRarity();
+            return nxt == null ? 0 : Math.max(0, nxt.bookingsNeeded - bookings);
+        }
+        /** Which icon id the UI should draw for this journey, picked from the destination. */
+        public String iconId() {
+            String n = to.name;
+            if (n.contains("Airport")) return "PLANE";
+            if (n.startsWith("Edinburgh")) return "CASTLE";
+            if (n.startsWith("Glasgow")) return "SKYLINE";
+            if (n.startsWith("Inverness") || n.startsWith("Fort William")) return "MOUNTAIN";
+            if (n.startsWith("Perth") || n.startsWith("Kinross")) return "TREE";
+            return "BUS";
+        }
+    }
+
+    // ---- Stops ----
+
+    /** Built-in stops (real Ember location IDs), used until or unless the live list loads. */
+    public static List<Stop> fallbackStops() {
+        return new ArrayList<>(Arrays.asList(FALLBACK_STOPS));
+    }
+
+    private static final Stop[] FALLBACK_STOPS = {
+        new Stop(13, "Dundee (City Centre)"), new Stop(42, "Edinburgh (City Centre)"),
+        new Stop(80, "Glasgow Bus Station"), new Stop(160, "Perth (City Centre)"),
+        new Stop(174, "Aberdeen (City Centre)"), new Stop(452, "Inverness (City Centre)"),
+        new Stop(49, "Edinburgh Airport"), new Stop(17, "Kinross Park and Ride"),
+        new Stop(283, "Fort William (Town Centre)"),
+    };
 
     // ---- Calls to the API ----
 
@@ -127,11 +164,20 @@ public final class EmberApi {
         return parseQuotes(get(url), originId, destinationId);
     }
 
+    /** The most popular stops; what the Book tab's dropdowns show. */
+    public static List<Stop> fetchStops() throws IOException { return searchStops(""); }
+
+    public static List<Quote> fetchQuotes(Stop from, Stop to, LocalDate day) throws IOException {
+        return getQuotes(from.id, to.id, day);
+    }
+
     /**
-     * Offline stand-in for demos with no internet: a real Dundee (13) to Edinburgh (42)
-     * weekday timetable captured from the API, moved onto the day you ask for.
+     * Offline stand-in: a real Dundee to Edinburgh weekday timetable captured from the API.
+     * Returns an empty list for any other route.
      */
-    public static List<Quote> sampleQuotes(LocalDate day) {
+    public static List<Quote> sampleQuotes(Stop from, Stop to, LocalDate day) {
+        List<Quote> out = new ArrayList<>();
+        if (from.id != SAMPLE_FROM || to.id != SAMPLE_TO) return out;
         String[][] rows = {
             {"05:16", "06:58", "47"}, {"06:17", "08:06", "37"}, {"06:28", "08:39", "43"},
             {"07:17", "09:02", "40"}, {"07:26", "09:34", "37"}, {"08:16", "10:01", "41"},
@@ -139,26 +185,75 @@ public final class EmberApi {
             {"12:25", "14:08", "52"}, {"14:19", "16:06", "45"}, {"16:19", "18:02", "52"},
             {"17:16", "18:55", "52"}, {"18:17", "19:53", "52"},
         };
-        List<Quote> out = new ArrayList<>();
         for (String[] r : rows) {
             Quote q = new Quote();
-            q.tripUid = "SAMPLE-" + day + "-" + r[0];
-            q.originId = 13;
-            q.destinationId = 42;
+            q.dep = day.atTime(LocalTime.parse(r[0])).atZone(LONDON);
+            q.arr = day.atTime(LocalTime.parse(r[1])).atZone(LONDON);
             q.originStop = "Dundee Slessor Gardens";
-            q.destinationStop = "George Street (Stop GL)";
-            q.departure = day.atTime(LocalTime.parse(r[0])).atZone(LONDON);
-            q.arrival = day.atTime(LocalTime.parse(r[1])).atZone(LONDON);
-            q.route = "E1";
-            q.boardText = "Edinburgh";
-            q.boardVia = "via Edinburgh Airport";
-            q.adultPence = 975;
-            q.childPence = 487;
-            q.seatsLeft = Integer.parseInt(r[2]);
+            q.destStop = "George Street (Stop GL)";
+            q.route = "E1"; q.board = "Edinburgh"; q.via = "via Edinburgh Airport";
+            q.pence = 975; q.seats = Integer.parseInt(r[2]);
             q.electric = q.wifi = q.toilet = true;
             out.add(q);
         }
         return out;
+    }
+
+    // ---- Streaks (in memory) ----
+
+    /** The current account's journeys (see AccountStore). */
+    private static List<Streak> journeys() { return AccountStore.current().journeys; }
+
+    /** All streaks, longest first. The returned list is a copy. */
+    public static List<Streak> getStreaks() {
+        List<Streak> copy = new ArrayList<>(journeys());
+        copy.sort((a, b) -> b.count - a.count);
+        return copy;
+    }
+
+    /** All journeys on the current account, most-booked first. The returned list is a copy. */
+    public static List<Streak> getJourneys() {
+        List<Streak> copy = new ArrayList<>(journeys());
+        copy.sort((a, b) -> b.bookings - a.bookings);
+        return copy;
+    }
+
+    /** The user's longest streak, or null if they have none. */
+    public static Streak bestStreak() {
+        List<Streak> all = getStreaks();
+        return all.isEmpty() ? null : all.get(0);
+    }
+
+    /** The streak for a departure on this route (closest time within 15 minutes), or null. */
+    public static Streak findStreak(Stop from, Stop to, LocalTime dep) {
+        Streak best = null;
+        long bestDiff = MATCH_MINUTES + 1;
+        for (Streak s : journeys()) {
+            if (!s.from.equals(from) || !s.to.equals(to)) continue;
+            long diff = Math.abs(Duration.between(s.time, dep).toMinutes());
+            if (diff < bestDiff) { best = s; bestDiff = diff; }
+        }
+        return best;
+    }
+
+    /** Records a booking: adds one day and one booking to the matching journey, or starts a new one. Saves the account. */
+    public static Streak recordBooking(Stop from, Stop to, LocalTime dep) {
+        Streak s = findStreak(from, to, dep);
+        if (s == null) {
+            s = new Streak(from, to, dep, 0, 0);
+            journeys().add(s);
+        }
+        s.count++;
+        s.bookings++;
+        AccountStore.save();
+        return s;
+    }
+
+    /** Short text for the table, e.g. "2 to 20% off" or "All unlocked". */
+    public static String nextReward(int streak) {
+        if (streak >= FREE_TRIP_AT) return "All unlocked";
+        int next = streak < REWARD_AT ? REWARD_AT : FREE_TRIP_AT;
+        return (next - streak) + " to " + (next == REWARD_AT ? "20% off" : "free trip");
     }
 
     // ---- Turning the API's JSON into Stops and Quotes ----
@@ -189,23 +284,19 @@ public final class EmberApi {
                 if (Boolean.FALSE.equals(at(q, "bookable"))) continue;
                 Object leg = ((List<Object>) legs).get(0);   // Ember has no connections yet: one leg
                 Quote x = new Quote();
-                x.tripUid = str(leg, "trip_uid");
-                x.originId = originId;
-                x.destinationId = destinationId;
                 x.originStop = str(leg, "origin", "name");
-                x.destinationStop = str(leg, "destination", "name");
-                x.departure = OffsetDateTime.parse(str(leg, "departure", "scheduled")).atZoneSameInstant(LONDON);
-                x.arrival = OffsetDateTime.parse(str(leg, "arrival", "scheduled")).atZoneSameInstant(LONDON);
+                x.destStop = str(leg, "destination", "name");
+                x.dep = OffsetDateTime.parse(str(leg, "departure", "scheduled")).atZoneSameInstant(LONDON);
+                x.arr = OffsetDateTime.parse(str(leg, "arrival", "scheduled")).atZoneSameInstant(LONDON);
                 x.route = str(leg, "description", "destination_board_content", "route_number");
-                x.boardText = str(leg, "description", "destination_board_content", "primary_text");
-                x.boardVia = str(leg, "description", "destination_board_content", "secondary_text");
-                x.numberPlate = str(leg, "description", "number_plate");
+                x.board = str(leg, "description", "destination_board_content", "primary_text");
+                x.via = str(leg, "description", "destination_board_content", "secondary_text");
+                x.plate = str(leg, "description", "number_plate");
                 x.electric = Boolean.TRUE.equals(at(leg, "description", "is_electric"));
                 x.wifi = Boolean.TRUE.equals(at(leg, "description", "amenities", "has_wifi"));
                 x.toilet = Boolean.TRUE.equals(at(leg, "description", "amenities", "has_toilet"));
-                x.adultPence = (int) num(q, "prices", "adult");
-                x.childPence = (int) num(q, "prices", "child");
-                x.seatsLeft = (int) num(q, "availability", "seat");
+                x.pence = (int) num(q, "prices", "adult");
+                x.seats = (int) num(q, "availability", "seat");
                 out.add(x);
             }
             return out;
@@ -318,23 +409,5 @@ public final class EmberApi {
         }
 
         private void ws() { while (i < s.length() && Character.isWhitespace(s.charAt(i))) i++; }
-    }
-
-    // ---- Try it: java data.EmberApi ----
-
-    public static void main(String[] args) {
-        LocalDate tomorrow = LocalDate.now(LONDON).plusDays(1);
-        try {
-            List<Stop> stops = searchStops("");
-            System.out.println(stops.size() + " stops, e.g.:");
-            for (Stop s : stops.subList(0, Math.min(5, stops.size()))) System.out.println("  " + s.id + "  " + s.name);
-            List<Quote> quotes = getQuotes(13, 42, tomorrow);
-            System.out.println(quotes.size() + " buses Dundee -> Edinburgh on " + tomorrow + ":");
-            for (Quote q : quotes) System.out.println("  " + q);
-        } catch (IOException e) {
-            System.out.println("Could not reach the Ember API: " + e.getMessage());
-            System.out.println("Sample timetable instead:");
-            for (Quote q : sampleQuotes(tomorrow)) System.out.println("  " + q);
-        }
     }
 }

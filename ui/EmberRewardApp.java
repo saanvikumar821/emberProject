@@ -18,10 +18,10 @@ import data.Account;
 import data.AccountStore;
 import data.Booking;
 import data.BookingStore;
-import data.BusData;
-import data.BusData.Quote;
-import data.BusData.Stop;
-import data.BusData.Streak;
+import data.EmberApi;
+import data.EmberApi.Quote;
+import data.EmberApi.Stop;
+import data.EmberApi.Streak;
 import data.Rarity;
 
 /**
@@ -36,17 +36,17 @@ import data.Rarity;
 public class EmberRewardApp {
 
     static final DateTimeFormatter DAY = DateTimeFormatter.ofPattern("EEE d MMM", Locale.UK);
-    static final int REWARD_AT = BusData.REWARD_AT;
-    static final int FREE_TRIP_AT = BusData.FREE_TRIP_AT;
+    static final int REWARD_AT = EmberApi.REWARD_AT;
+    static final int FREE_TRIP_AT = EmberApi.FREE_TRIP_AT;
 
     // The one colour the palette has no equivalent for: "only N seats left" warnings.
     static final Color WARN = new Color(0xE0A030);
     static final Color SHADE = new Color(0, 0, 0, 60);   // dark overlay on rarity-coloured cards
 
     // ---- App state ----
-    List<Stop> stops = BusData.fallbackStops();
+    List<Stop> stops = EmberApi.fallbackStops();
     Stop from = stops.get(0), to = stops.get(1);
-    LocalDate date = LocalDate.now(BusData.LONDON).plusDays(1);
+    LocalDate date = LocalDate.now(EmberApi.LONDON).plusDays(1);
     List<Quote> quotes = new ArrayList<>();
     boolean loading, live;
     String error;
@@ -114,7 +114,7 @@ public class EmberRewardApp {
     void loadStops() {
         new SwingWorker<List<Stop>, Void>() {
             @Override protected List<Stop> doInBackground() throws Exception {
-                return BusData.fetchStops();
+                return EmberApi.fetchStops();
             }
             @Override protected void done() {
                 try {
@@ -148,10 +148,10 @@ public class EmberRewardApp {
             String problem;
             @Override protected List<Quote> doInBackground() {
                 try {
-                    return BusData.fetchQuotes(f, t, d);
+                    return EmberApi.fetchQuotes(f, t, d);
                 } catch (Exception e) {
                     gotLive = false;
-                    List<Quote> sample = BusData.sampleQuotes(f, t, d);
+                    List<Quote> sample = EmberApi.sampleQuotes(f, t, d);
                     if (!sample.isEmpty()) return sample;
                     problem = "Couldn't reach the Ember API. Check your connection and try again.";
                     return new ArrayList<>();
@@ -161,7 +161,7 @@ public class EmberRewardApp {
                 if (req != requestNo) return;   // a newer search replaced this one
                 List<Quote> result;
                 try { result = get(); } catch (Exception e) { result = new ArrayList<>(); }
-                ZonedDateTime now = ZonedDateTime.now(BusData.LONDON);
+                ZonedDateTime now = ZonedDateTime.now(EmberApi.LONDON);
                 result.removeIf(q -> q.dep.isBefore(now));
                 result.removeIf(q -> q.seats <= 0);
                 quotes = result;
@@ -173,7 +173,7 @@ public class EmberRewardApp {
         }.execute();
     }
 
-    Streak journeyOf(Quote q) { return BusData.findStreak(from, to, q.dep.toLocalTime()); }
+    Streak journeyOf(Quote q) { return EmberApi.findStreak(from, to, q.dep.toLocalTime()); }
 
     int streakOf(Quote q) {
         Streak s = journeyOf(q);
@@ -200,7 +200,7 @@ public class EmberRewardApp {
 
     JComponent journeysScreen() {
         Account acc = AccountStore.current();
-        List<Streak> js = BusData.getJourneys();
+        List<Streak> js = EmberApi.getJourneys();
         Col p = new Col(BG, null, 0, 0);
         p.add(header("Journeys", "Book a trip again to level it up"));
         Col body = new Col(BG, null, 0, 16);
@@ -249,7 +249,7 @@ public class EmberRewardApp {
 
         card.add(fill(label("<html><body style='width:125px'>" + s.from.shortName() + " \u2192 "
                 + s.to.shortName() + "</body></html>", 13, true, TEXT), 36));
-        card.add(label("Around " + BusData.HM.format(s.time), 12, false, TEXT));
+        card.add(label("Around " + EmberApi.HM.format(s.time), 12, false, TEXT));
         card.add(gap(8));
         card.add(fill(new Bar((int) Math.round(s.progress() * 100), 100, new Color(0, 0, 0, 70), TEXT), 8));
         card.add(gap(4));
@@ -282,7 +282,7 @@ public class EmberRewardApp {
         info.add(label(r.label.toUpperCase() + " \u00B7 LEVEL " + r.level(), 12, true, TEXT));
         info.add(label("<html><body style='width:200px'>" + s.from.shortName() + " \u2192 "
                 + s.to.shortName() + "</body></html>", 16, true, TEXT));
-        info.add(label("Around " + BusData.HM.format(s.time), 12, false, TEXT));
+        info.add(label("Around " + EmberApi.HM.format(s.time), 12, false, TEXT));
         top.add(info, BorderLayout.CENTER);
         hero.add(fill(top, 70));
         hero.add(gap(12));
@@ -367,7 +367,7 @@ public class EmberRewardApp {
         Btn prev = new Btn("\u2039", 1), next = new Btn("\u203A", 1);
         prev.setPreferredSize(new Dimension(44, 34));
         next.setPreferredSize(new Dimension(44, 34));
-        prev.setEnabled(date.isAfter(LocalDate.now(BusData.LONDON)));
+        prev.setEnabled(date.isAfter(LocalDate.now(EmberApi.LONDON)));
         prev.addActionListener(e -> { date = date.minusDays(1); loadQuotes(); });
         next.addActionListener(e -> { date = date.plusDays(1); loadQuotes(); });
         JLabel dayLabel = label(dayName(), 15, true, TEXT);
@@ -456,7 +456,7 @@ public class EmberRewardApp {
         Streak j = journeyOf(q);
         int s = j == null ? 0 : j.count;
         boolean discounted = s >= REWARD_AT;
-        int off = discounted ? (int) Math.round(q.pence * BusData.DISCOUNT) : 0;
+        int off = discounted ? (int) Math.round(q.pence * EmberApi.DISCOUNT) : 0;
 
         Col p = new Col(BG, null, 0, 0);
         p.add(header("Checkout", dayName()));
@@ -506,7 +506,7 @@ public class EmberRewardApp {
             Streak prev = journeyOf(q);
             tierBefore = prev == null ? null : prev.rarity();
             Rarity accountBefore = AccountStore.current().highestRarity();
-            lastBooked = BusData.recordBooking(from, to, q.dep.toLocalTime());
+            lastBooked = EmberApi.recordBooking(from, to, q.dep.toLocalTime());
             Rarity now = lastBooked.rarity();
             levelledUp = now != tierBefore;   // also true for a brand-new journey
             rewardTier = levelledUp && (accountBefore == null || now.ordinal() > accountBefore.ordinal())
@@ -532,9 +532,9 @@ public class EmberRewardApp {
             c.add(label(q.route + "  " + q.board + (q.via.isEmpty() ? "" : " " + q.via), 13, true, ACCENT));
             c.add(gap(8));
         }
-        c.add(label(BusData.HM.format(q.dep) + "   " + q.originStop, 15, true, TEXT));
+        c.add(label(EmberApi.HM.format(q.dep) + "   " + q.originStop, 15, true, TEXT));
         c.add(label("              " + q.duration(), 12, false, MUTED));
-        c.add(label(BusData.HM.format(q.arr) + "   " + q.destStop, 15, true, TEXT));
+        c.add(label(EmberApi.HM.format(q.arr) + "   " + q.destStop, 15, true, TEXT));
         List<String> extras = new ArrayList<>();
         if (q.electric) extras.add("Electric coach");
         if (q.wifi) extras.add("Wi-Fi");
@@ -667,7 +667,7 @@ public class EmberRewardApp {
         c.add(fill(row, 22));
 
         String day = DAY.format(b.departure);
-        String time = BusData.HM.format(b.departure);
+        String time = EmberApi.HM.format(b.departure);
         c.add(label(day + " \u00B7 " + time
                 + (b.route.isEmpty() ? "" : " \u00B7 Route " + b.route), 12, false, MUTED));
         c.add(gap(4));
@@ -681,7 +681,7 @@ public class EmberRewardApp {
 
     String stopName(int id) {
         for (Stop s : stops) if (s.id == id) return s.name;
-        for (Stop s : BusData.fallbackStops()) if (s.id == id) return s.name;
+        for (Stop s : EmberApi.fallbackStops()) if (s.id == id) return s.name;
         return "Stop " + id;
     }
 
@@ -692,7 +692,7 @@ public class EmberRewardApp {
         p.add(header("My streaks", "Same bus, day after day"));
         Col body = new Col(BG, null, 0, 16);
 
-        Streak best = BusData.bestStreak();
+        Streak best = EmberApi.bestStreak();
         int bestCount = best == null ? 0 : best.count;
         int next = bestCount < REWARD_AT ? REWARD_AT : FREE_TRIP_AT;
         Col hero = new Col(ACCENT, null, 16, 18);
@@ -732,13 +732,13 @@ public class EmberRewardApp {
     }
 
     JComponent streakTable() {
-        List<Streak> all = BusData.getStreaks();
+        List<Streak> all = EmberApi.getStreaks();
         if (all.isEmpty()) return card(12);
         DefaultTableModel model = new DefaultTableModel(new String[]{"Bus", "Streak", "Next reward"}, 0) {
             @Override public boolean isCellEditable(int r, int c) { return false; }
         };
         for (Streak s : all) {
-            model.addRow(new Object[]{s.label(), "\u2605 " + s.count, BusData.nextReward(s.count)});
+            model.addRow(new Object[]{s.label(), "\u2605 " + s.count, EmberApi.nextReward(s.count)});
         }
 
         JTable table = new JTable(model);
@@ -919,7 +919,7 @@ public class EmberRewardApp {
     // ---- UI helpers ----
 
     String dayName() {
-        LocalDate today = LocalDate.now(BusData.LONDON);
+        LocalDate today = LocalDate.now(EmberApi.LONDON);
         String prefix = date.equals(today) ? "Today, " : date.equals(today.plusDays(1)) ? "Tomorrow, " : "";
         return prefix + DAY.format(date);
     }
