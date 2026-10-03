@@ -22,8 +22,10 @@ import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 import javax.swing.filechooser.FileNameExtensionFilter;
@@ -62,6 +64,7 @@ public class EmberRewardApp {
     Streak lastBooked;
     Booking lastBooking;
     Rarity tierBefore, rewardTier;     // for the "levelled up" panel after paying
+    List<String> gainedIcons = new ArrayList<>();   // icons unlocked by the latest booking
     boolean levelledUp, justUnlocked;
     String accountMsg;
     String screen = "journeys";
@@ -197,11 +200,6 @@ public class EmberRewardApp {
         }
     }
 
-    static Rarity rarityForIcon(String iconId) {
-        for (Rarity r : Rarity.values()) if (r.iconId.equals(iconId)) return r;
-        return null;
-    }
-
     // ---- Journeys tab (the main feature) ----
 
     JComponent journeysScreen() {
@@ -331,7 +329,9 @@ public class EmberRewardApp {
             txt.add(label(t.label + " \u00B7 Level " + t.level(), 14, true, TEXT));
             txt.add(label(t.bookingsNeeded + (t.bookingsNeeded == 1 ? " trip" : " trips"), 12, false,
                     reached ? TEXT : MUTED));
-            txt.add(label(Icons.name(t.iconId) + " icon + \u201C" + t.title + "\u201D title", 12, false,
+            txt.add(label(t == Rarity.COMMON
+                    ? "\u201C" + t.title + "\u201D title"
+                    : "Random new icon + \u201C" + t.title + "\u201D title", 12, false,
                     reached ? TEXT : MUTED));
             line.add(txt, BorderLayout.CENTER);
             line.add(label(reached ? "\u2713" : "", 18, true, TEXT), BorderLayout.EAST);
@@ -494,7 +494,10 @@ public class EmberRewardApp {
             Streak prev = journeyOf(q);
             tierBefore = prev == null ? null : prev.rarity();
             Rarity accountBefore = AccountStore.current().highestRarity();
+            Set<String> iconsBefore = new HashSet<>(AccountStore.current().unlockedIcons);
             lastBooked = EmberApi.recordBooking(from, to, q.dep.toLocalTime());
+            gainedIcons = new ArrayList<>(AccountStore.current().unlockedIcons);
+            gainedIcons.removeAll(iconsBefore);
             Rarity now = lastBooked.rarity();
             levelledUp = now != tierBefore;   // also true for a brand-new journey
             rewardTier = levelledUp && (accountBefore == null || now.ordinal() > accountBefore.ordinal())
@@ -565,8 +568,15 @@ public class EmberRewardApp {
         lv.add(fill(new Bar((int) Math.round(st.progress() * 100), 100, new Color(0, 0, 0, 70), TEXT), 8));
         if (rewardTier != null) {
             lv.add(gap(10));
-            lv.add(wrapped("New reward: " + Icons.name(rewardTier.iconId) + " icon and the \u201C"
-                    + rewardTier.title + "\u201D title. Equip them in Account.", 13, TEXT));
+            lv.add(wrapped("New reward: the \u201C" + rewardTier.title + "\u201D title"
+                    + (gainedIcons.isEmpty() ? "." : " and a new profile icon, now equipped!"), 13, TEXT));
+            if (!gainedIcons.isEmpty()) {
+                lv.add(gap(8));
+                JPanel newIcons = new JPanel(new FlowLayout(FlowLayout.LEFT, 6, 0));
+                newIcons.setOpaque(false);
+                for (String id : gainedIcons) newIcons.add(new IconView(id, 48, SHADE, TEXT, true));
+                lv.add(fill(newIcons, 50));
+            }
         }
         body.add(lv);
         body.add(gap(10));
@@ -797,11 +807,10 @@ public class EmberRewardApp {
         Grid icons = new Grid(6);
         for (String id : Icons.ACCOUNT_ICONS) {
             boolean ok = acc.hasIcon(id);
-            Rarity need = rarityForIcon(id);
-            IconView v = new IconView(ok ? id : "LOCK", 52, ok ? rarityColor(need) : CARD,
+            IconView v = new IconView(ok ? id : "LOCK", 52, ok ? SHADE : CARD,
                     ok ? TEXT : MUTED, false);
             v.selected = id.equals(acc.iconId);
-            v.setToolTipText(ok ? Icons.name(id) : "Reach " + need.label + " on any journey to unlock");
+            v.setToolTipText(ok ? Icons.name(id) : "Reach a new level on any journey to unlock a random icon");
             if (ok) {
                 v.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
                 v.addMouseListener(new MouseAdapter() {

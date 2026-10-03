@@ -3,6 +3,9 @@ package data;
 import data.EmberApi.Streak;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Random;
+import java.util.Set;
 
 /** One local account: profile choices plus that person's journeys. Create via AccountStore. */
 public class Account {
@@ -14,6 +17,8 @@ public class Account {
     public String iconId = DEFAULT_ICON;     // the equipped profile icon
     public String title = DEFAULT_TITLE;     // the equipped profile title
     public final List<Streak> journeys = new ArrayList<>();
+    private static final Random RNG = new Random();
+    public final Set<String> unlockedIcons = new LinkedHashSet<>();
 
     Account(String username, String displayName) {
         this.username = username;
@@ -37,9 +42,7 @@ public class Account {
     }
 
     public boolean hasIcon(String id) {
-        if (DEFAULT_ICON.equals(id)) return true;
-        for (Rarity r : Rarity.values()) if (r.iconId.equals(id)) return hasReached(r);
-        return false;
+        return DEFAULT_ICON.equals(id) || unlockedIcons.contains(id);
     }
 
     public List<String> unlockedTitles() {
@@ -47,5 +50,30 @@ public class Account {
         out.add(DEFAULT_TITLE);
         for (Rarity r : Rarity.values()) if (hasReached(r)) out.add(r.title);
         return out;
+    }
+
+    private String grantRandomIcon() {
+        List<String> pool = new ArrayList<>(IconCatalog.all());
+        pool.removeAll(unlockedIcons);
+        if (pool.isEmpty()) return null;
+        String pick = pool.get(RNG.nextInt(pool.size()));
+        unlockedIcons.add(pick);
+        return pick;
+    }
+
+    // Account.java
+    public void syncRewards(Rarity before) {
+        Rarity now = highestRarity();
+        if (now == null || now == before) return;
+        int from = before == null ? -1 : before.ordinal();
+        String last = null;
+        for (Rarity r : Rarity.values()) {
+            if (r.ordinal() > from && r.ordinal() <= now.ordinal() && r != Rarity.COMMON) {
+                String icon = grantRandomIcon();
+                if (icon != null) last = icon;
+            }
+        }
+        if (last != null) iconId = last;
+        title = now.title;
     }
 }

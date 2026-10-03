@@ -21,7 +21,8 @@ import java.util.*;
  *   accounts=demo,rob
  *   current=rob
  *   account.rob.name=Rob
- *   account.rob.icon=BUS
+ *   account.rob.icon=avatar-03-cat
+ *   account.rob.icons=avatar-03-cat,avatar-09-owl
  *   account.rob.title=Passenger
  *   account.rob.journeys=1
  *   account.rob.journey.0=13|Dundee (City Centre)|42|Edinburgh (City Centre)|07:17|4|12
@@ -87,6 +88,7 @@ public final class AccountStore {
             String k = "account." + a.username + ".";
             p.setProperty(k + "name", a.displayName);
             p.setProperty(k + "icon", a.iconId);
+            p.setProperty(k + "icons", String.join(",", a.unlockedIcons));
             p.setProperty(k + "title", a.title);
             p.setProperty(k + "journeys", String.valueOf(a.journeys.size()));
             for (int i = 0; i < a.journeys.size(); i++) {
@@ -121,6 +123,9 @@ public final class AccountStore {
             Account a = new Account(user, p.getProperty(k + "name", user));
             a.iconId = p.getProperty(k + "icon", Account.DEFAULT_ICON);
             a.title = p.getProperty(k + "title", Account.DEFAULT_TITLE);
+            for (String id : p.getProperty(k + "icons", "").split(",")) {
+                if (!id.trim().isEmpty()) a.unlockedIcons.add(id.trim());
+            }
             int n = 0;
             try { n = Integer.parseInt(p.getProperty(k + "journeys", "0")); } catch (NumberFormatException ignored) { }
             for (int i = 0; i < n; i++) {
@@ -145,7 +150,8 @@ public final class AccountStore {
         a.journeys.add(new Streak(st.get(3), st.get(2), LocalTime.of(9, 15), 7, 16));    // Epic
         a.journeys.add(new Streak(st.get(0), st.get(4), LocalTime.of(10, 0), 1, 1));     // Common
         a.journeys.add(new Streak(st.get(1), st.get(0), LocalTime.of(17, 16), 3, 32));   // Legendary
-        a.iconId = "MOUNTAIN";
+        a.unlockedIcons.addAll(List.of("avatar-07-star", "avatar-03-cat", "avatar-09-owl", "avatar-01-bus"));
+        a.iconId = "avatar-07-star";
         a.title = "Commuter";
         ACCOUNTS.put(a.username, a);
         current = a;

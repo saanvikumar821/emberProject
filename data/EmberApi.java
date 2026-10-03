@@ -238,6 +238,9 @@ public final class EmberApi {
 
     /** Records a booking: adds one day and one booking to the matching journey, or starts a new one. Saves the account. */
     public static Streak recordBooking(Stop from, Stop to, LocalTime dep) {
+        Account acc = AccountStore.current();
+        Rarity before = acc.highestRarity();      // snapshot before the booking
+
         Streak s = findStreak(from, to, dep);
         if (s == null) {
             s = new Streak(from, to, dep, 0, 0);
@@ -245,7 +248,9 @@ public final class EmberApi {
         }
         s.count++;
         s.bookings++;
-        AccountStore.save();
+
+        acc.syncRewards(before);                   // equips the new tier's icon if it went up
+        AccountStore.save();                       // saves the new icon/title too
         return s;
     }
 
