@@ -2,13 +2,44 @@ package ui;
 
 import java.awt.*;
 import java.awt.geom.*;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
+import javax.imageio.ImageIO;
 
-/** Small vector icons drawn with Java2D, so no image files are needed. Ids match data.Rarity.iconId. */
+/**
+ * Icons for the app. Vector icons (PERSON, BUS, ...) are drawn with Java2D; the
+ * "avatar-..." icons are PNG files loaded from the images/ folder.
+ */
 final class Icons {
     private Icons() { }
 
     /** Icons a player can equip on their profile (the first is the free default). */
-    static final String[] ACCOUNT_ICONS = {"PERSON", "BUS", "TREE", "MOUNTAIN", "CASTLE", "STAR"};
+    static final String[] ACCOUNT_ICONS = buildIcons();
+
+    private static String[] buildIcons() {
+        List<String> l = new ArrayList<>();
+        l.add("PERSON");
+        l.addAll(data.IconCatalog.all());
+        return l.toArray(new String[0]);
+    }
+
+    // ---- PNG avatars (images/<id>.png, relative to the working directory) ----
+
+    private static final Map<String, BufferedImage> CACHE = new HashMap<>();
+
+    private static BufferedImage load(String id) {
+        return CACHE.computeIfAbsent(id, k -> {
+            try {
+                return ImageIO.read(new File("images/" + k + ".png"));
+            } catch (Exception e) {
+                return null;   // missing file: draws nothing
+            }
+        });
+    }
 
     static String name(String id) {
         switch (id) {
@@ -20,12 +51,30 @@ final class Icons {
             case "STAR": return "Star";
             case "PLANE": return "Plane";
             case "SKYLINE": return "Skyline";
-            default: return id;
+            default:
+                // "avatar-03-cat" -> "Cat"
+                if (id.startsWith("avatar-")) {
+                    String n = id.substring(id.lastIndexOf('-') + 1);
+                    return Character.toUpperCase(n.charAt(0)) + n.substring(1);
+                }
+                return id;
         }
     }
 
     /** Draws icon `id` inside the square (x, y, size, size). Unknown ids draw nothing. */
     static void draw(Graphics2D g0, String id, int x, int y, int size, Color color) {
+        if (id.startsWith("avatar-")) {
+            BufferedImage img = load(id);
+            if (img != null) {
+                Graphics2D ga = (Graphics2D) g0.create();
+                ga.setRenderingHint(RenderingHints.KEY_INTERPOLATION,
+                        RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+                ga.drawImage(img, x, y, size, size, null);
+                ga.dispose();
+            }
+            return;
+        }
+
         Graphics2D g = (Graphics2D) g0.create();
         g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
         g.translate(x, y);
