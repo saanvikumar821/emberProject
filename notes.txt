@@ -2,12 +2,24 @@ API stuff: https://wics-hackathon-docs-28b89c.gitlab.io/
 
 
 What counts as the same bus?
+- Same route 
+- Same subroute?
+
+What are we counting as a streak?
+- Once a week
+- Super streak everyday
 
 What breaks a streak?
+- Missing a week
+- Can they pay keep their streak
 
 Is there a streak freeze?
+- Yes pay and reward
 
 What are the rewards?
+- Streak freeze
+- Free ride for your birthday
+- Cheaper month passes
 
 Why would ember want this?
 
