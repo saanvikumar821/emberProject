@@ -12,13 +12,7 @@ import static ui.Constants.*;
  * All data is fake and held in memory; payment is mocked.
  */
 public class EmberMockup {
-
-    // ---- Look and feel ----
-    static final Color CARD = new Color(0x1E, 0x2A, 0x31);
-    static final Color GOOD = new Color(0x4C, 0xD9, 0x8A);
-    static final Color TEXT = new Color(0xF2, 0xF4, 0xF5);
-    static final Color MUTED = new Color(0x9A, 0xA8, 0xB0);
-
+    
     // ---- Fake data ----
     static class Trip {
         final String dep, arr; final double price;
