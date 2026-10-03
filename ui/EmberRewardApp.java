@@ -3,7 +3,6 @@ package ui;
 import data.Account;
 import data.AccountStore;
 import data.Booking;
-import data.BookingStore;
 import data.EmberApi;
 import data.EmberApi.Quote;
 import data.EmberApi.Stop;
@@ -600,10 +599,6 @@ public class EmberRewardApp {
         body.add(result);
         body.add(gap(16));
 
-        Btn viewB = new Btn("View my bookings", 0);
-        viewB.addActionListener(e -> show("bookings", bookingsScreen()));
-        body.add(fill(viewB, 46));
-        body.add(gap(8));
         Btn view = new Btn("View my journeys", 1);
         view.addActionListener(e -> show("journeys", journeysScreen()));
         body.add(fill(view, 40));
@@ -613,78 +608,6 @@ public class EmberRewardApp {
         body.add(fill(again, 40));
         p.add(body);
         return p;
-    }
-
-    // ---- My bookings ----
-
-    JComponent bookingsScreen() {
-        Col p = new Col(BG, null, 0, 0);
-        p.add(header("My bookings", "Every trip you've booked"));
-        Col body = new Col(BG, null, 0, 16);
-
-        List<Booking> all = BookingStore.all();
-        if (all.isEmpty()) {
-            Col empty = card(14);
-            empty.add(label("No bookings yet", 16, true, TEXT));
-            empty.add(gap(4));
-            empty.add(wrapped("Your tickets will show up here once you've booked a trip.", 13, MUTED));
-            empty.add(gap(12));
-            Btn go = new Btn("Book a trip", 0);
-            go.addActionListener(e -> openSearch());
-            empty.add(fill(go, 40));
-            body.add(empty);
-            p.add(body);
-            return p;
-        }
-
-        int spent = 0, saved = 0;
-        for (Booking b : all) { spent += b.pricePaidPence; saved += b.discountPence(); }
-        Col sum = new Col(OVERVIEW, ACCENT, 16, 14);
-        sum.add(label(all.size() + (all.size() == 1 ? " booking" : " bookings"), 18, true, TEXT));
-        sum.add(gap(4));
-        sum.add(label("Total paid: " + money(spent), 13, false, TEXT));
-        if (saved > 0) sum.add(label("Saved with rewards: " + money(saved), 13, true, GOOD));
-        body.add(sum);
-        body.add(gap(14));
-
-        body.add(label("Recent", 15, true, TEXT));
-        body.add(gap(6));
-        for (Booking b : all) {
-            body.add(bookingCard(b));
-            body.add(gap(8));
-        }
-        p.add(body);
-        return p;
-    }
-
-    JComponent bookingCard(Booking b) {
-        Col c = card(12);
-        String fromName = stopName(b.originId);
-        String toName = stopName(b.destinationId);
-
-        JPanel row = new JPanel(new BorderLayout());
-        row.setOpaque(false);
-        row.add(label(fromName + " \u2192 " + toName, 14, true, TEXT), BorderLayout.WEST);
-        row.add(label(money(b.pricePaidPence), 15, true, TEXT), BorderLayout.EAST);
-        c.add(fill(row, 22));
-
-        String day = DAY.format(b.departure);
-        String time = EmberApi.HM.format(b.departure);
-        c.add(label(day + " \u00B7 " + time
-                + (b.route.isEmpty() ? "" : " \u00B7 Route " + b.route), 12, false, MUTED));
-        c.add(gap(4));
-        if (b.discountPence() > 0) {
-            c.add(label("Saved " + money(b.discountPence()) + " with a streak reward", 12, true, GOOD));
-            c.add(gap(4));
-        }
-        c.add(label("Ticket " + b.tripId, 11, false, MUTED));
-        return c;
-    }
-
-    String stopName(int id) {
-        for (Stop s : stops) if (s.id == id) return s.name;
-        for (Stop s : EmberApi.fallbackStops()) if (s.id == id) return s.name;
-        return "Stop " + id;
     }
 
     // ---- Streaks tab ----
@@ -800,12 +723,6 @@ public class EmberRewardApp {
         row.add(info, BorderLayout.CENTER);
         profile.add(fill(row, 64));
         body.add(profile);
-        body.add(gap(16));
-
-        // My bookings button
-        Btn myBookings = new Btn("My bookings (" + BookingStore.all().size() + ")", 1);
-        myBookings.addActionListener(e -> show("bookings", bookingsScreen()));
-        body.add(fill(myBookings, 40));
         body.add(gap(16));
 
         // Icon chooser
