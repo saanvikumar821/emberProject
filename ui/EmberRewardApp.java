@@ -1,6 +1,8 @@
 package ui;
 
 import java.awt.*;
+import java.awt.event.MouseAdapter;
+import java.awt.event.MouseEvent;
 import java.time.LocalDate;
 import java.time.ZonedDateTime;
 import java.time.format.DateTimeFormatter;
@@ -12,18 +14,22 @@ import javax.swing.border.EmptyBorder;
 import javax.swing.table.DefaultTableModel;
 
 import static ui.Constants.*;
+import data.Account;
+import data.AccountStore;
 import data.BusData;
 import data.BusData.Quote;
 import data.BusData.Stop;
 import data.BusData.Streak;
+import data.Rarity;
 
 /**
- * Ember bus booking with per-bus streak rewards.
+ * Ember bus booking where every journey you book levels up.
  * Compile from the project root:  javac data/*.java ui/*.java
  * Run with:                       java ui.EmberRewardApp
  *
- * All colours come from ui.Constants; all stops, journeys and streaks come
- * from data.BusData. Payment is simulated: nothing is ever sent to the API.
+ * Tabs: Journeys (the level-up collection), Book, Streaks, Account.
+ * Colours come from ui.Constants; data and accounts come from the data package.
+ * Payment is simulated: nothing is ever sent to the API.
  */
 public class EmberRewardApp {
 
@@ -33,6 +39,7 @@ public class EmberRewardApp {
 
     // The one colour the palette has no equivalent for: "only N seats left" warnings.
     static final Color WARN = new Color(0xE0A030);
+    static final Color SHADE = new Color(0, 0, 0, 60);   // dark overlay on rarity-coloured cards
 
     // ---- App state ----
     List<Stop> stops = BusData.fallbackStops();
@@ -43,9 +50,12 @@ public class EmberRewardApp {
     String error;
     int requestNo;
     Quote selected;
+    Streak selectedJourney;
     Streak lastBooked;
-    boolean justUnlocked;
-    String screen = "search";
+    Rarity tierBefore, rewardTier;     // for the "levelled up" panel after paying
+    boolean levelledUp, justUnlocked;
+    String accountMsg;
+    String screen = "journeys";
 
     final JFrame frame = new JFrame(APP_TITLE);
     final Page page = new Page();
@@ -70,9 +80,10 @@ public class EmberRewardApp {
         scroll.getViewport().setBackground(BG);
         frame.add(scroll, BorderLayout.CENTER);
         frame.add(navBar(), BorderLayout.SOUTH);
+        show("journeys", journeysScreen());
         frame.setVisible(true);
         loadStops();
-        loadQuotes();
+        loadQuotes();   // loads in the background; the Book tab shows it when opened
     }
 
     void show(String name, JComponent content) {
@@ -82,6 +93,17 @@ public class EmberRewardApp {
         page.revalidate();
         page.repaint();
         page.scrollRectToVisible(new Rectangle(0, 0, 1, 1));
+    }
+
+    /** Redraws the Book tab, but only if the user is looking at it. */
+    void refreshSearch() {
+        if (screen.equals("search")) show("search", searchScreen());
+    }
+
+    /** Opens the Book tab and (re)loads departures for the current from/to/date. */
+    void openSearch() {
+        screen = "search";
+        loadQuotes();
     }
 
     // ---- Loading data (network calls run off the UI thread) ----
@@ -98,7 +120,7 @@ public class EmberRewardApp {
                     if (!loaded.contains(from)) loaded.add(0, from);
                     if (!loaded.contains(to)) loaded.add(to);
                     stops = loaded;
-                    if (screen.equals("search")) show("search", searchScreen());
+                    refreshSearch();
                 } catch (Exception ignored) { /* keep the fallback list */ }
             }
         }.execute();
@@ -113,11 +135,11 @@ public class EmberRewardApp {
         if (f.equals(t)) {
             loading = false;
             error = "Pick two different stops.";
-            show("search", searchScreen());
+            refreshSearch();
             return;
         }
         loading = true;
-        show("search", searchScreen());
+        refreshSearch();
         new SwingWorker<List<Quote>, Void>() {
             boolean gotLive = true;
             String problem;
@@ -142,21 +164,180 @@ public class EmberRewardApp {
                 live = gotLive;
                 error = problem;
                 loading = false;
-                if (screen.equals("search")) show("search", searchScreen());
+                refreshSearch();
             }
         }.execute();
     }
 
+    Streak journeyOf(Quote q) { return BusData.findStreak(from, to, q.dep.toLocalTime()); }
+
     int streakOf(Quote q) {
-        Streak s = BusData.findStreak(from, to, q.dep.toLocalTime());
+        Streak s = journeyOf(q);
         return s == null ? 0 : s.count;
     }
 
-    // ---- Screens ----
+    static Color rarityColor(Rarity r) {
+        if (r == null) return OVERVIEW;
+        switch (r) {
+            case COMMON: return RARITY_COMMON;
+            case UNCOMMON: return RARITY_UNCOMMON;
+            case RARE: return RARITY_RARE;
+            case EPIC: return RARITY_EPIC;
+            default: return RARITY_LEGENDARY;
+        }
+    }
+
+    static Rarity rarityForIcon(String iconId) {
+        for (Rarity r : Rarity.values()) if (r.iconId.equals(iconId)) return r;
+        return null;
+    }
+
+    // ---- Journeys tab (the main feature) ----
+
+    JComponent journeysScreen() {
+        Account acc = AccountStore.current();
+        List<Streak> js = BusData.getJourneys();
+        Col p = new Col(BG, null, 0, 0);
+        p.add(header("Journeys", "Book a trip again to level it up"));
+        Col body = new Col(BG, null, 0, 16);
+
+        JPanel who = new JPanel(new BorderLayout(10, 0));
+        who.setOpaque(false);
+        Rarity top = acc.highestRarity();
+        who.add(new IconView(acc.iconId, 36, top == null ? CARD : rarityColor(top), TEXT, true), BorderLayout.WEST);
+        JPanel who2 = vbox();
+        who2.add(label(acc.displayName + " \u00B7 " + acc.title, 14, true, TEXT));
+        who2.add(label(js.size() + (js.size() == 1 ? " journey" : " journeys") + " collected", 12, false, MUTED));
+        who.add(who2, BorderLayout.CENTER);
+        body.add(fill(who, 38));
+        body.add(gap(12));
+
+        if (js.isEmpty()) {
+            body.add(wrapped("No journeys yet. Book a bus and it appears here as a Common journey; book it "
+                    + "again and again to level it up.", 14, MUTED));
+            body.add(gap(10));
+            Btn go = new Btn("Find a bus", 0);
+            go.addActionListener(e -> openSearch());
+            body.add(fill(go, 42));
+        } else {
+            Grid grid = new Grid(2);
+            for (Streak s : js) grid.add(journeyCard(s));
+            body.add(grid);
+        }
+        p.add(body);
+        return p;
+    }
+
+    JComponent journeyCard(Streak s) {
+        Rarity r = s.rarity();
+        Color c = rarityColor(r);
+        Col card = new Col(c, c.brighter(), 16, 12);
+
+        JPanel top = new JPanel(new BorderLayout(8, 0));
+        top.setOpaque(false);
+        top.add(new IconView(s.iconId(), 44, SHADE, TEXT, false), BorderLayout.WEST);
+        JPanel tag = vbox();
+        tag.add(label(r.label.toUpperCase(), 11, true, TEXT));
+        tag.add(label("Level " + r.level(), 14, true, TEXT));
+        top.add(tag, BorderLayout.CENTER);
+        card.add(fill(top, 44));
+        card.add(gap(8));
+
+        card.add(fill(label("<html><body style='width:125px'>" + s.from.shortName() + " \u2192 "
+                + s.to.shortName() + "</body></html>", 13, true, TEXT), 36));
+        card.add(label("Around " + BusData.HM.format(s.time), 12, false, TEXT));
+        card.add(gap(8));
+        card.add(fill(new Bar((int) Math.round(s.progress() * 100), 100, new Color(0, 0, 0, 70), TEXT), 8));
+        card.add(gap(4));
+        card.add(label(s.nextRarity() == null ? "Max level \u00B7 " + s.bookings + " trips"
+                : s.bookings + " / " + s.nextRarity().bookingsNeeded + " trips", 11, false, TEXT));
+
+        card.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+        card.addMouseListener(new MouseAdapter() {
+            @Override public void mouseClicked(MouseEvent e) {
+                selectedJourney = s;
+                show("journey", journeyScreen());
+            }
+        });
+        return card;
+    }
+
+    JComponent journeyScreen() {
+        Streak s = selectedJourney;
+        Rarity r = s.rarity();
+        Color c = rarityColor(r);
+        Col p = new Col(BG, null, 0, 0);
+        p.add(header("Journey", "Level up by booking it again"));
+        Col body = new Col(BG, null, 0, 16);
+
+        Col hero = new Col(c, c.brighter(), 16, 16);
+        JPanel top = new JPanel(new BorderLayout(12, 0));
+        top.setOpaque(false);
+        top.add(new IconView(s.iconId(), 64, SHADE, TEXT, false), BorderLayout.WEST);
+        JPanel info = vbox();
+        info.add(label(r.label.toUpperCase() + " \u00B7 LEVEL " + r.level(), 12, true, TEXT));
+        info.add(label("<html><body style='width:200px'>" + s.from.shortName() + " \u2192 "
+                + s.to.shortName() + "</body></html>", 16, true, TEXT));
+        info.add(label("Around " + BusData.HM.format(s.time), 12, false, TEXT));
+        top.add(info, BorderLayout.CENTER);
+        hero.add(fill(top, 70));
+        hero.add(gap(12));
+        hero.add(fill(new Bar((int) Math.round(s.progress() * 100), 100, new Color(0, 0, 0, 70), TEXT), 10));
+        hero.add(gap(6));
+        hero.add(label(s.nextRarity() == null
+                ? "Max level reached \u00B7 " + s.bookings + " trips"
+                : s.bookings + " trips \u00B7 " + s.bookingsToNext() + " more to reach " + s.nextRarity().label,
+                13, true, TEXT));
+        body.add(hero);
+        body.add(gap(12));
+
+        Btn book = new Btn("Book this journey", 0);
+        book.addActionListener(e -> {
+            if (!stops.contains(s.from)) stops.add(s.from);
+            if (!stops.contains(s.to)) stops.add(s.to);
+            from = s.from;
+            to = s.to;
+            openSearch();
+        });
+        body.add(fill(book, 44));
+        body.add(gap(6));
+        Btn back = new Btn("Back to journeys", 2);
+        back.addActionListener(e -> show("journeys", journeysScreen()));
+        body.add(fill(back, 36));
+        body.add(gap(14));
+
+        body.add(label("Levels and rewards", 15, true, TEXT));
+        body.add(label("Reaching a level on any journey unlocks its reward for your account.", 12, false, MUTED));
+        body.add(gap(8));
+        for (Rarity t : Rarity.values()) {
+            boolean reached = s.bookings >= t.bookingsNeeded;
+            Color tc = rarityColor(t);
+            Col row = reached ? new Col(tc, tc.brighter(), 14, 10) : new Col(CARD, tc, 14, 10);
+            JPanel line = new JPanel(new BorderLayout(10, 0));
+            line.setOpaque(false);
+            line.add(new IconView(t.iconId, 40, reached ? SHADE : OVERVIEW, reached ? TEXT : MUTED, false),
+                    BorderLayout.WEST);
+            JPanel txt = vbox();
+            txt.add(label(t.label + " \u00B7 Level " + t.level(), 14, true, TEXT));
+            txt.add(label(t.bookingsNeeded + (t.bookingsNeeded == 1 ? " trip" : " trips"), 12, false,
+                    reached ? TEXT : MUTED));
+            txt.add(label(Icons.name(t.iconId) + " icon + \u201C" + t.title + "\u201D title", 12, false,
+                    reached ? TEXT : MUTED));
+            line.add(txt, BorderLayout.CENTER);
+            line.add(label(reached ? "\u2713" : "", 18, true, TEXT), BorderLayout.EAST);
+            row.add(fill(line, 48));
+            body.add(row);
+            body.add(gap(8));
+        }
+        p.add(body);
+        return p;
+    }
+
+    // ---- Book tab ----
 
     JComponent searchScreen() {
         Col p = new Col(BG, null, 0, 0);
-        p.add(header("Where to?", "Book the same bus to build a streak"));
+        p.add(header("Where to?", "Book the same bus to level it up"));
         Col body = new Col(BG, null, 0, 16);
 
         Col form = card(14);
@@ -205,12 +386,12 @@ public class EmberRewardApp {
         } else if (quotes.isEmpty()) {
             body.add(wrapped("No buses left on this day for this route. Try another date.", 14, MUTED));
         } else {
-            // Buses that already have a streak go in their own section, longest streak first.
+            // Buses you've booked before go in their own section, most-levelled first.
             List<Quote> mine = new ArrayList<>();
-            for (Quote q : quotes) if (streakOf(q) > 0) mine.add(q);
-            mine.sort((a, b) -> streakOf(b) - streakOf(a));
+            for (Quote q : quotes) if (journeyOf(q) != null) mine.add(q);
+            mine.sort((a, b) -> journeyOf(b).bookings - journeyOf(a).bookings);
             if (!mine.isEmpty()) {
-                body.add(label(mine.size() == 1 ? "Your bus" : "Your buses", 15, true, TEXT));
+                body.add(label(mine.size() == 1 ? "Your journey" : "Your journeys", 15, true, TEXT));
                 body.add(gap(6));
                 for (Quote q : mine) {
                     body.add(quoteCard(q, true));
@@ -232,9 +413,10 @@ public class EmberRewardApp {
         return p;
     }
 
-    JComponent quoteCard(Quote q, boolean hasStreak) {
-        int s = streakOf(q);
-        Col c = hasStreak ? new Col(OVERVIEW, ACCENT, 14, 12) : card(12);
+    JComponent quoteCard(Quote q, boolean booked) {
+        Streak j = journeyOf(q);
+        Rarity r = j == null ? null : j.rarity();
+        Col c = booked ? new Col(OVERVIEW, rarityColor(r), 14, 12) : card(12);
         JPanel row = new JPanel(new BorderLayout());
         row.setOpaque(false);
         row.add(label(q.times(), 19, true, TEXT), BorderLayout.WEST);
@@ -248,12 +430,12 @@ public class EmberRewardApp {
         row2.add(label(few ? "Only " + q.seats + " seats left" : q.seats + " seats", 12, few, few ? WARN : MUTED),
                 BorderLayout.EAST);
         c.add(fill(row2, 18));
-        if (hasStreak) {
+        if (booked) {
             c.add(gap(4));
-            c.add(label("\u2605 " + s + "-day streak \u00B7 book to make it " + (s + 1), 12, true, GOOD));
+            c.add(label("\u2605 " + r.label + " journey \u00B7 " + j.count + "-day streak", 12, true, GOOD));
         }
         c.add(gap(8));
-        Btn pick = new Btn("Select", hasStreak ? 0 : 1);
+        Btn pick = new Btn("Select", booked ? 0 : 1);
         pick.addActionListener(e -> {
             selected = q;
             show("checkout", checkoutScreen());
@@ -264,7 +446,8 @@ public class EmberRewardApp {
 
     JComponent checkoutScreen() {
         Quote q = selected;
-        int s = streakOf(q);
+        Streak j = journeyOf(q);
+        int s = j == null ? 0 : j.count;
         boolean discounted = s >= REWARD_AT;
         int off = discounted ? (int) Math.round(q.pence * BusData.DISCOUNT) : 0;
 
@@ -288,14 +471,29 @@ public class EmberRewardApp {
         else if (s + 1 >= REWARD_AT) note = "\u2605 Booking this unlocks 20% off this bus!";
         else if (s == 0) note = "\u2605 Book this bus to start a streak.";
         else note = "\u2605 Booking this takes your streak to day " + (s + 1) + ".";
-        Col banner = s > 0 ? new Col(OVERVIEW, ACCENT, 12, 12) : card(12);
+        String levelNote;
+        if (j == null) levelNote = "New journey: you'll discover it at Common.";
+        else if (j.nextRarity() == null) levelNote = "This journey is already Legendary.";
+        else levelNote = j.rarity().label + " journey \u00B7 " + (j.bookingsToNext() == 1
+                ? "this trip levels it up to " + j.nextRarity().label + "!"
+                : j.bookingsToNext() + " trips to " + j.nextRarity().label + ".");
+        Col banner = j != null ? new Col(OVERVIEW, rarityColor(j.rarity()), 12, 12) : card(12);
         banner.add(wrapped(note, 13, s > 0 ? GOOD : MUTED));
+        banner.add(gap(4));
+        banner.add(wrapped(levelNote, 13, TEXT));
         body.add(banner);
         body.add(gap(16));
 
         Btn pay = new Btn("Pay " + money(q.pence - off), 0);
         pay.addActionListener(e -> {
+            Streak prev = journeyOf(q);
+            tierBefore = prev == null ? null : prev.rarity();
+            Rarity accountBefore = AccountStore.current().highestRarity();
             lastBooked = BusData.recordBooking(from, to, q.dep.toLocalTime());
+            Rarity now = lastBooked.rarity();
+            levelledUp = now != tierBefore;   // also true for a brand-new journey
+            rewardTier = levelledUp && (accountBefore == null || now.ordinal() > accountBefore.ordinal())
+                    ? now : null;
             justUnlocked = (lastBooked.count == REWARD_AT || lastBooked.count == FREE_TRIP_AT);
             show("confirm", confirmScreen());
         });
@@ -310,6 +508,7 @@ public class EmberRewardApp {
         return p;
     }
 
+    /** The bus details card used on the checkout and confirm screens. */
     JComponent journeyCard(Quote q) {
         Col c = card(14);
         if (!q.route.isEmpty()) {
@@ -333,35 +532,66 @@ public class EmberRewardApp {
     JComponent confirmScreen() {
         Quote q = selected;
         Streak st = lastBooked;
+        Rarity now = st.rarity();
+        Color rc = rarityColor(now);
         Col p = new Col(BG, null, 0, 0);
         p.add(header("\u2713 You're booked", dayName()));
         Col body = new Col(BG, null, 0, 16);
         body.add(journeyCard(q));
         body.add(gap(6));
-        body.add(label("Demo ticket ref: DEMO-" + (1000 + st.count * 37), 12, false, MUTED));
+        body.add(label("Demo ticket ref: DEMO-" + (1000 + st.bookings * 37), 12, false, MUTED));
         body.add(gap(12));
 
-        Col result = new Col(OVERVIEW, ACCENT, 12, 14);
-        result.add(label("\u2605 Streak: " + st.count + " days", 19, true, GOOD));
+        // Level panel: celebrates a level-up, otherwise shows progress to the next level.
+        Col lv = new Col(rc, rc.brighter(), 16, 14);
+        JPanel row = new JPanel(new BorderLayout(12, 0));
+        row.setOpaque(false);
+        row.add(new IconView(st.iconId(), 52, SHADE, TEXT, false), BorderLayout.WEST);
+        JPanel txt = vbox();
+        if (levelledUp) {
+            txt.add(label(tierBefore == null ? "New journey discovered!" : "Journey levelled up!", 16, true, TEXT));
+            txt.add(label(tierBefore == null ? now.label + " \u00B7 Level 1"
+                    : tierBefore.label + " \u2192 " + now.label, 13, true, TEXT));
+        } else {
+            txt.add(label(now.label + " journey \u00B7 Level " + now.level(), 15, true, TEXT));
+            txt.add(label(st.nextRarity() == null ? "Max level" : st.bookingsToNext() + " more trips to "
+                    + st.nextRarity().label, 13, false, TEXT));
+        }
+        row.add(txt, BorderLayout.CENTER);
+        lv.add(fill(row, 52));
+        lv.add(gap(10));
+        lv.add(fill(new Bar((int) Math.round(st.progress() * 100), 100, new Color(0, 0, 0, 70), TEXT), 8));
+        if (rewardTier != null) {
+            lv.add(gap(10));
+            lv.add(wrapped("New reward: " + Icons.name(rewardTier.iconId) + " icon and the \u201C"
+                    + rewardTier.title + "\u201D title. Equip them in Account.", 13, TEXT));
+        }
+        body.add(lv);
+        body.add(gap(10));
+
+        Col result = new Col(OVERVIEW, null, 12, 12);
+        result.add(label("\u2605 Streak: " + st.count + " days", 16, true, GOOD));
         result.add(label("on the " + st.label(), 12, false, MUTED));
         if (justUnlocked) {
             String what = st.count >= FREE_TRIP_AT ? "a free trip" : "20% off this bus";
             result.add(gap(4));
-            result.add(label("Reward unlocked: " + what + "!", 14, true, TEXT));
+            result.add(label("Streak reward unlocked: " + what + "!", 14, true, TEXT));
         }
         body.add(result);
         body.add(gap(16));
 
-        Btn view = new Btn("View my streaks", 0);
-        view.addActionListener(e -> show("streak", streakScreen()));
+        Btn view = new Btn("View my journeys", 0);
+        view.addActionListener(e -> show("journeys", journeysScreen()));
         body.add(fill(view, 46));
         body.add(gap(8));
         Btn again = new Btn("Book another trip", 1);
-        again.addActionListener(e -> { date = date.plusDays(1); loadQuotes(); });
+        again.addActionListener(e -> { date = date.plusDays(1); openSearch(); });
         body.add(fill(again, 40));
         p.add(body);
         return p;
     }
+
+    // ---- Streaks tab ----
 
     JComponent streakScreen() {
         Col p = new Col(BG, null, 0, 0);
@@ -376,7 +606,7 @@ public class EmberRewardApp {
         hero.add(label(best == null ? "No streaks yet: book a bus to start one"
                 : "best streak \u00B7 days in a row on the " + best.label(), 13, false, TEXT));
         hero.add(gap(12));
-        hero.add(fill(new Bar(Math.min(bestCount, next), next), 10));
+        hero.add(fill(new Bar(Math.min(bestCount, next), next, ACCENT.darker(), TEXT), 10));
         hero.add(gap(8));
         String nextText = bestCount >= FREE_TRIP_AT ? "All rewards unlocked"
                 : (next - bestCount) + " more to unlock " + (next == REWARD_AT ? "20% off" : "a free trip");
@@ -389,7 +619,7 @@ public class EmberRewardApp {
         body.add(streakTable());
         body.add(gap(16));
 
-        body.add(label("Rewards (earned per bus)", 15, true, TEXT));
+        body.add(label("Streak rewards (earned per bus)", 15, true, TEXT));
         body.add(gap(6));
         body.add(rewardCard("20% off that bus", REWARD_AT, bestCount));
         body.add(gap(8));
@@ -451,18 +681,138 @@ public class EmberRewardApp {
         return c;
     }
 
+    // ---- Account tab ----
+
+    JComponent accountScreen() {
+        Account acc = AccountStore.current();
+        Rarity top = acc.highestRarity();
+        Col p = new Col(BG, null, 0, 0);
+        p.add(header("Account", "Your profile and rewards"));
+        Col body = new Col(BG, null, 0, 16);
+
+        // Profile card
+        Color pc = rarityColor(top);
+        Col profile = top == null ? card(14) : new Col(pc, pc.brighter(), 16, 14);
+        JPanel row = new JPanel(new BorderLayout(12, 0));
+        row.setOpaque(false);
+        row.add(new IconView(acc.iconId, 64, top == null ? OVERVIEW : SHADE, TEXT, true), BorderLayout.WEST);
+        JPanel info = vbox();
+        info.add(label(acc.displayName, 18, true, TEXT));
+        info.add(label(acc.title, 13, false, TEXT));
+        info.add(label("@" + acc.username + " \u00B7 " + acc.journeys.size() + " journeys \u00B7 "
+                + (top == null ? "no tier yet" : top.label + " tier"), 12, false, top == null ? MUTED : TEXT));
+        row.add(info, BorderLayout.CENTER);
+        profile.add(fill(row, 64));
+        body.add(profile);
+        body.add(gap(16));
+
+        // Icon chooser
+        body.add(label("Profile icon", 15, true, TEXT));
+        body.add(label("Unlock new icons by levelling up journeys.", 12, false, MUTED));
+        body.add(gap(6));
+        Grid icons = new Grid(6);
+        for (String id : Icons.ACCOUNT_ICONS) {
+            boolean ok = acc.hasIcon(id);
+            Rarity need = rarityForIcon(id);
+            IconView v = new IconView(ok ? id : "LOCK", 52, ok ? rarityColor(need) : CARD,
+                    ok ? TEXT : MUTED, false);
+            v.selected = id.equals(acc.iconId);
+            v.setToolTipText(ok ? Icons.name(id) : "Reach " + need.label + " on any journey to unlock");
+            if (ok) {
+                v.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
+                v.addMouseListener(new MouseAdapter() {
+                    @Override public void mouseClicked(MouseEvent e) {
+                        acc.iconId = id;
+                        AccountStore.save();
+                        show("account", accountScreen());
+                    }
+                });
+            }
+            icons.add(v);
+        }
+        body.add(icons);
+        body.add(gap(16));
+
+        // Title chooser
+        body.add(label("Profile title", 15, true, TEXT));
+        body.add(gap(6));
+        JComboBox<String> titles = new JComboBox<>(acc.unlockedTitles().toArray(new String[0]));
+        styleCombo(titles);
+        titles.setSelectedItem(acc.title);
+        titles.addActionListener(e -> {
+            String t = (String) titles.getSelectedItem();
+            if (t != null && !t.equals(acc.title)) {
+                acc.title = t;
+                AccountStore.save();
+                show("account", accountScreen());
+            }
+        });
+        body.add(fill(titles, 34));
+        body.add(gap(16));
+
+        // Switch account
+        body.add(label("Accounts on this computer", 15, true, TEXT));
+        body.add(gap(6));
+        for (Account other : AccountStore.all()) {
+            boolean me = other == acc;
+            Btn b = new Btn(other.displayName + (me ? "  (signed in)" : ""), me ? 0 : 1);
+            b.addActionListener(e -> {
+                if (!me) AccountStore.setCurrent(other);
+                accountMsg = null;
+                show("account", accountScreen());
+            });
+            body.add(fill(b, 38));
+            body.add(gap(6));
+        }
+        body.add(gap(10));
+
+        // Create account
+        body.add(label("Create a new account", 15, true, TEXT));
+        body.add(gap(6));
+        JTextField name = new JTextField();
+        styleField(name);
+        body.add(fill(name, 36));
+        body.add(gap(6));
+        Btn create = new Btn("Create and sign in", 0);
+        Runnable doCreate = () -> {
+            Account made = AccountStore.create(name.getText());
+            accountMsg = made == null
+                    ? "Pick a name that isn't empty or already taken." : "Welcome, " + made.displayName + "!";
+            show("account", accountScreen());
+        };
+        create.addActionListener(e -> doCreate.run());
+        name.addActionListener(e -> doCreate.run());
+        body.add(fill(create, 40));
+        if (accountMsg != null) {
+            body.add(gap(6));
+            body.add(label(accountMsg, 12, false, accountMsg.startsWith("Welcome") ? GOOD : WARN));
+        }
+        body.add(gap(8));
+        body.add(label("Accounts are saved on this computer only.", 11, false, MUTED));
+        p.add(body);
+        return p;
+    }
+
+    // ---- Navigation ----
+
     JComponent navBar() {
-        JPanel nav = new JPanel(new GridLayout(1, 2, 8, 0));
+        JPanel nav = new JPanel(new GridLayout(1, 4, 6, 0));
         nav.setBackground(CARD);
         nav.setBorder(BorderFactory.createCompoundBorder(
-                BorderFactory.createMatteBorder(1, 0, 0, 0, OVERVIEW), new EmptyBorder(8, 12, 8, 12)));
+                BorderFactory.createMatteBorder(1, 0, 0, 0, OVERVIEW), new EmptyBorder(8, 10, 8, 10)));
         nav.setPreferredSize(new Dimension(WINDOW_WIDTH, NAGIVATION_HEIGHT));
+        Btn journeys = new Btn("Journeys", 2);
         Btn book = new Btn("Book", 2);
-        Btn str = new Btn("\u2605 My streaks", 2);
+        Btn str = new Btn("Streaks", 2);
+        Btn acct = new Btn("Account", 2);
+        journeys.addActionListener(e -> show("journeys", journeysScreen()));
         book.addActionListener(e -> show("search", searchScreen()));
         str.addActionListener(e -> show("streak", streakScreen()));
+        acct.addActionListener(e -> { accountMsg = null; show("account", accountScreen()); });
+        nav.add(journeys);
         nav.add(book);
         nav.add(str);
+        nav.add(acct);
         return nav;
     }
 
@@ -487,9 +837,25 @@ public class EmberRewardApp {
 
     static Col card(int pad) { return new Col(CARD, OVERVIEW, 14, pad); }
 
+    static JPanel vbox() {
+        JPanel v = new JPanel();
+        v.setLayout(new BoxLayout(v, BoxLayout.Y_AXIS));
+        v.setOpaque(false);
+        return v;
+    }
+
     static void styleCombo(JComboBox<?> b) {
         b.setBackground(CARD);
         b.setForeground(TEXT);
+    }
+
+    static void styleField(JTextField f) {
+        f.setBackground(CARD);
+        f.setForeground(TEXT);
+        f.setCaretColor(TEXT);
+        f.setFont(new Font(Font.SANS_SERIF, Font.PLAIN, 14));
+        f.setBorder(BorderFactory.createCompoundBorder(
+                BorderFactory.createLineBorder(OVERVIEW), new EmptyBorder(4, 8, 4, 8)));
     }
 
     static JLabel label(String text, int size, boolean bold, Color color) {
@@ -547,6 +913,51 @@ public class EmberRewardApp {
         }
     }
 
+    /** A grid with a fixed number of columns that keeps its natural height. */
+    static class Grid extends JPanel {
+        Grid(int cols) {
+            super(new GridLayout(0, cols, cols > 2 ? 8 : 10, cols > 2 ? 8 : 10));
+            setOpaque(false);
+            setAlignmentX(Component.LEFT_ALIGNMENT);
+        }
+        @Override public Dimension getMaximumSize() {
+            return new Dimension(Integer.MAX_VALUE, getPreferredSize().height);
+        }
+    }
+
+    /** A rounded square (or circle) badge with a vector icon inside. */
+    static class IconView extends JComponent {
+        final String id; final Color bg, fg; final boolean circle;
+        boolean selected;
+        IconView(String id, int size, Color bg, Color fg, boolean circle) {
+            this.id = id; this.bg = bg; this.fg = fg; this.circle = circle;
+            Dimension d = new Dimension(size, size);
+            setPreferredSize(d);
+            setMinimumSize(d);
+            setMaximumSize(d);
+            setAlignmentX(Component.LEFT_ALIGNMENT);
+        }
+        @Override protected void paintComponent(Graphics g) {
+            Graphics2D g2 = (Graphics2D) g.create();
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            int side = Math.min(getWidth(), getHeight());
+            if (bg != null) {
+                g2.setColor(bg);
+                if (circle) g2.fillOval(0, 0, side, side);
+                else g2.fillRoundRect(0, 0, side, side, side / 4, side / 4);
+            }
+            int pad = side / 6;
+            Icons.draw(g2, id, pad, pad, side - 2 * pad, fg);
+            if (selected) {
+                g2.setColor(ACCENT);
+                g2.setStroke(new BasicStroke(3f));
+                if (circle) g2.drawOval(1, 1, side - 3, side - 3);
+                else g2.drawRoundRect(1, 1, side - 3, side - 3, side / 4, side / 4);
+            }
+            g2.dispose();
+        }
+    }
+
     /** Rounded button. kind: 0 = filled accent, 1 = outlined, 2 = text only. */
     static class Btn extends JButton {
         final int kind;
@@ -585,18 +996,20 @@ public class EmberRewardApp {
         }
     }
 
-    /** Thin rounded progress bar, drawn on the accent-coloured streak card. */
+    /** Thin rounded progress bar with a track colour and a fill colour. */
     static class Bar extends JComponent {
-        final int value, max;
-        Bar(int value, int max) { this.value = value; this.max = max; }
+        final int value, max; final Color track, fillColor;
+        Bar(int value, int max, Color track, Color fillColor) {
+            this.value = value; this.max = max; this.track = track; this.fillColor = fillColor;
+        }
         @Override protected void paintComponent(Graphics g) {
             Graphics2D g2 = (Graphics2D) g.create();
             g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
             int w = getWidth(), h = getHeight();
-            g2.setColor(ACCENT.darker());
+            g2.setColor(track);
             g2.fillRoundRect(0, 0, w, h, h, h);
-            g2.setColor(TEXT);
-            g2.fillRoundRect(0, 0, Math.max(h, w * value / max), h, h, h);
+            g2.setColor(fillColor);
+            g2.fillRoundRect(0, 0, Math.max(h, w * value / Math.max(1, max)), h, h, h);
             g2.dispose();
         }
     }

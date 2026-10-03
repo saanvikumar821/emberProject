@@ -52,14 +52,41 @@ public final class BusData {
         }
     }
 
-    /** One streak = one bus: a route plus a usual departure time. */
+    /** One journey = one bus: a route plus a usual departure time. Tracks its streak and its lifetime bookings. */
     public static class Streak {
-        public final Stop from, to; public final LocalTime time; public int count;
-        Streak(Stop from, Stop to, LocalTime time, int count) {
-            this.from = from; this.to = to; this.time = time; this.count = count;
+        public final Stop from, to; public final LocalTime time;
+        public int count;      // current streak (days in a row); drives the discount
+        public int bookings;   // lifetime bookings of this journey; drives its rarity level
+        public Streak(Stop from, Stop to, LocalTime time, int count, int bookings) {
+            this.from = from; this.to = to; this.time = time; this.count = count; this.bookings = bookings;
         }
         public String label() {
             return from.shortName() + " \u2192 " + to.shortName() + " \u00B7 " + HM.format(time);
+        }
+        /** Current rarity tier, or null if never booked. */
+        public Rarity rarity() { return Rarity.forBookings(bookings); }
+        /** The tier this journey is working towards, or null at max level. */
+        public Rarity nextRarity() { Rarity r = rarity(); return r == null ? Rarity.COMMON : r.next(); }
+        /** Progress (0..1) from the current tier to the next one; 1.0 at max level. */
+        public double progress() {
+            Rarity cur = rarity(), nxt = nextRarity();
+            if (nxt == null) return 1.0;
+            int base = cur == null ? 0 : cur.bookingsNeeded;
+            return Math.min(1.0, (double) (bookings - base) / (nxt.bookingsNeeded - base));
+        }
+        public int bookingsToNext() {
+            Rarity nxt = nextRarity();
+            return nxt == null ? 0 : Math.max(0, nxt.bookingsNeeded - bookings);
+        }
+        /** Which icon id the UI should draw for this journey, picked from the destination. */
+        public String iconId() {
+            String n = to.name;
+            if (n.contains("Airport")) return "PLANE";
+            if (n.startsWith("Edinburgh")) return "CASTLE";
+            if (n.startsWith("Glasgow")) return "SKYLINE";
+            if (n.startsWith("Inverness") || n.startsWith("Fort William")) return "MOUNTAIN";
+            if (n.startsWith("Perth") || n.startsWith("Kinross")) return "TREE";
+            return "BUS";
         }
     }
 
@@ -156,17 +183,20 @@ public final class BusData {
 
     // ---- Streaks (in memory) ----
 
-    private static final List<Streak> STREAKS = new ArrayList<>();
-    static {   // fake starting data
-        STREAKS.add(new Streak(FALLBACK_STOPS[0], FALLBACK_STOPS[1], LocalTime.of(7, 17), 4));
-        STREAKS.add(new Streak(FALLBACK_STOPS[0], FALLBACK_STOPS[1], LocalTime.of(8, 16), 2));
-        STREAKS.add(new Streak(FALLBACK_STOPS[3], FALLBACK_STOPS[2], LocalTime.of(9, 15), 7));
-    }
+    /** The current account's journeys (see AccountStore). */
+    private static List<Streak> journeys() { return AccountStore.current().journeys; }
 
     /** All streaks, longest first. The returned list is a copy. */
     public static List<Streak> getStreaks() {
-        List<Streak> copy = new ArrayList<>(STREAKS);
+        List<Streak> copy = new ArrayList<>(journeys());
         copy.sort((a, b) -> b.count - a.count);
+        return copy;
+    }
+
+    /** All journeys on the current account, most-booked first. The returned list is a copy. */
+    public static List<Streak> getJourneys() {
+        List<Streak> copy = new ArrayList<>(journeys());
+        copy.sort((a, b) -> b.bookings - a.bookings);
         return copy;
     }
 
@@ -180,7 +210,7 @@ public final class BusData {
     public static Streak findStreak(Stop from, Stop to, LocalTime dep) {
         Streak best = null;
         long bestDiff = MATCH_MINUTES + 1;
-        for (Streak s : STREAKS) {
+        for (Streak s : journeys()) {
             if (!s.from.equals(from) || !s.to.equals(to)) continue;
             long diff = Math.abs(Duration.between(s.time, dep).toMinutes());
             if (diff < bestDiff) { best = s; bestDiff = diff; }
@@ -188,14 +218,16 @@ public final class BusData {
         return best;
     }
 
-    /** Records a booking: adds one day to the matching streak, or starts a new streak at 1. */
+    /** Records a booking: adds one day and one booking to the matching journey, or starts a new one. Saves the account. */
     public static Streak recordBooking(Stop from, Stop to, LocalTime dep) {
         Streak s = findStreak(from, to, dep);
         if (s == null) {
-            s = new Streak(from, to, dep, 0);
-            STREAKS.add(s);
+            s = new Streak(from, to, dep, 0, 0);
+            journeys().add(s);
         }
         s.count++;
+        s.bookings++;
+        AccountStore.save();
         return s;
     }
 

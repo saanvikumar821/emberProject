@@ -21,4 +21,10 @@ public final class Constants {
     public static final Color GOOD = new Color(0x4C, 0xD9, 0x8A);
     public static final Color TEXT = new Color(0xF2, 0xF4, 0xF5);
     public static final Color MUTED = new Color(0x9A, 0xA8, 0xB0);
+
+    public static final Color RARITY_COMMON    = Color.decode("#6B7681");  // grey
+    public static final Color RARITY_UNCOMMON  = Color.decode("#3F8F66");  // green
+    public static final Color RARITY_RARE      = Color.decode("#3A74B8");  // blue
+    public static final Color RARITY_EPIC      = Color.decode("#8650B5");  // purple
+    public static final Color RARITY_LEGENDARY = Color.decode("#C98A1B");  // gold
 }
